@@ -22,7 +22,7 @@ d = open(os.path.join(out, 'prof.bin'), 'rb').read()
 base, cbase = struct.unpack('>II', d[:8])
 pcs = struct.unpack('>%dI' % ((len(d) - 8) // 4), d[8:])
 f = open(os.path.join(out, 'frames.bin'), 'rb').read()
-fr = [struct.unpack('>III', f[i:i + 12]) for i in range(0, len(f) - 11, 12)]      # (vblank, tick) per drawn frame
+fr = [struct.unpack('>9I', f[i:i + 36])[:3] for i in range(0, len(f) - 35, 36)]      # (vblank, tick) per drawn frame
 
 nm = subprocess.run(['docker', 'run', '--rm', '-v', os.getcwd() + ':/work', '-w', '/work', 'amigadev/crosstools:m68k-amigaos',
                      'm68k-amigaos-nm', exe], capture_output=True, text=True).stdout

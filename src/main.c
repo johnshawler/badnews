@@ -47,7 +47,7 @@ static int game_load(void)
 /* debug: a sampling profiler. At every vertical blank, find the interrupted program counter in the exception
    frame (SR with the supervisor byte clear, PC, format word $006C for the level 3 vector) and keep it. */
 ULONG prof_pc[16384], prof_n;
-ULONG frame_log[3 * 5000], frame_n;       /* debug: vertical blank, tick and display time at every drawn frame */
+ULONG frame_log[9 * 3000], frame_n;       /* debug: vertical blank, tick, display time and its parts (vlast[0..5]) at every drawn frame */
 static void prof_hook(void)
 {
     UWORD *w;
@@ -83,6 +83,9 @@ static void read_keys(void)
     logic_extra_pad = p;
 }
 
+#define AHEAD_BEAM 40000                /* colour clocks into the frame: later, a tick may not fit before the flip */
+static ULONG bench_ticks;               /* the bench length, or 0 */
+
 static void game_draw(void)
 {
     disp_begin();
@@ -95,11 +98,15 @@ static void game_draw(void)
     sound_frame();
     read_keys();
 #ifdef LOGIC_TRACE
-    { extern ULONG frame_log[], frame_n; if (frame_n < 5000) { frame_log[frame_n * 3] = sys_frame; frame_log[frame_n * 3 + 1] = logic_frames; frame_log[frame_n * 3 + 2] = video_last; frame_n++; } }
+    { extern ULONG frame_log[], frame_n; if (frame_n < 3000) { extern ULONG vlast[]; int k_; ULONG *e_ = frame_log + frame_n * 9; e_[0] = sys_frame; e_[1] = logic_frames; e_[2] = video_last; for (k_ = 0; k_ < 6; k_++) e_[3 + k_] = vlast[k_]; frame_n++; } }
 #endif
 #ifdef HOLD_AT                          /* debug: freeze the picture at a tick, for a screenshot */
     if (logic_frames >= HOLD_AT) { int i; disp_flip(); for (i = 0; i < 50 * 120 && !sys_keys[KEY_ESC]; i++) sys_wait_frame(); }
 #endif
+    /* Idle time left in this frame: run the next tick now (src/logic.c, game_tick_ahead), with the input the loop
+       would pass it. Every fifth frame needs two ticks; this way it does the work of one. Never past the bench. */
+    if (sys_beam() < AHEAD_BEAM && !(bench_ticks && logic_calls >= bench_ticks))
+        game_tick_ahead(bench_ticks ? game_bench_input(logic_calls) : sys_joy(1));
 }
 
 /* ---- the loop: keep as it is ------------------------------------------------------------------ */
@@ -110,6 +117,7 @@ int main(int argc, char **argv)
     ULONG last, now, vblanks, t0, frames = 0, ticks = 0, acc = 0, hz;
     char text[40];
 
+    bench_ticks = bench;                                        /* for game_draw(): never run ahead past the bench */
     if (!game_load() || !disp_open(&display)) { disp_close(); sys_free_all(); return 20; }
     sys_force_pal = 1;                                          /* NTSC machine: run the 256-line picture at 50 Hz */
     if (!sys_take()) { disp_close(); sys_free_all(); return 20; }
@@ -160,7 +168,7 @@ int main(int argc, char **argv)
                 fh = Open((CONST_STRPTR)"video.txt", MODE_NEWFILE); if (fh) { Write(fh, b, strlen(b)); Close(fh); } }
             {   extern void *reset_fn; extern ULONG prof_buf[], prof_cnt; ULONG base = (ULONG)reset_fn; fh = Open((CONST_STRPTR)"prof.bin", MODE_NEWFILE);
                 ULONG cbase = (ULONG)game_tick; if (fh) { Write(fh, &base, 4); Write(fh, &cbase, 4); Write(fh, prof_buf, prof_cnt * 4); Close(fh); } }
-            {   fh = Open((CONST_STRPTR)"frames.bin", MODE_NEWFILE); if (fh) { Write(fh, frame_log, frame_n * 12); Close(fh); } }
+            {   fh = Open((CONST_STRPTR)"frames.bin", MODE_NEWFILE); if (fh) { Write(fh, frame_log, frame_n * 36); Close(fh); } }
             {   extern uint32_t logic_time[]; fh = Open((CONST_STRPTR)"ticktime.bin", MODE_NEWFILE);
                 if (fh) { Write(fh, logic_time, logic_ntrace * 4); Close(fh); } }
         }

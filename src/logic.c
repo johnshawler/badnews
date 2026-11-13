@@ -60,7 +60,7 @@ void game_init(void)
     co_init(nes_main, co_stack, sizeof co_stack);
 }
 
-void game_tick(unsigned short in)
+static void run_tick(unsigned short in)
 {
     uint8_t p = logic_extra_pad;
     if (in & IN_A) p |= 0x01;
@@ -91,6 +91,28 @@ void game_tick(unsigned short in)
         logic_dump[0x804] = cpu_c; logic_dump[0x805] = cpu_z; logic_dump[0x806] = cpu_n; logic_dump[0x807] = cpu_v; }
 #endif
 #endif
+}
+
+/* A tick can be run before the loop asks for it, in the idle time at the end of a drawn frame (game_tick_ahead,
+   called by src/main.c with the input the loop would pass): with 60 ticks on a 50 Hz display every fifth frame
+   needs two ticks, and this moves one of them into the frame before. The loop's game_tick() then finds it done.
+   Game time is unchanged: the tick still counts when the loop asks for it. The host test never runs ahead. */
+static int ahead;
+unsigned logic_calls;                           /* game_tick() calls so far: the number of the next tick */
+
+void game_tick(unsigned short in)
+{
+    logic_calls++;
+    if (ahead) { ahead = 0; return; }
+    run_tick(in);
+}
+
+int game_tick_ahead(unsigned short in)
+{
+    if (ahead) return 0;
+    run_tick(in);
+    ahead = 1;
+    return 1;
 }
 
 /* Bench: the self-playing mode through the busiest scenes. */

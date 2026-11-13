@@ -5,7 +5,7 @@ frames.bin: (vertical blank, tick, display colour clocks) at every drawn frame; 
 import sys, struct, os
 d = sys.argv[1]; step = int(sys.argv[2]) if len(sys.argv) > 2 else 250
 f = open(os.path.join(d, 'frames.bin'), 'rb').read()
-fr = [struct.unpack('>III', f[i:i + 12]) for i in range(0, len(f) - 11, 12)]
+fr = [struct.unpack('>9I', f[i:i + 36])[:3] for i in range(0, len(f) - 35, 36)]
 t = open(os.path.join(d, 'ticktime.bin'), 'rb').read(); tt = struct.unpack('>%dI' % (len(t) // 4), t)
 late = {}; shown = {}
 for (v0, k0, d0), (v1, k1, d1) in zip(fr, fr[1:]):

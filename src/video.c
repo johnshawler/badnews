@@ -41,6 +41,11 @@
 #define PUTW(p, v) (((UBYTE *)(p))[0] = (UBYTE)((v) >> 8), ((UBYTE *)(p))[1] = (UBYTE)(v))
 #endif
 
+#ifdef LOGIC_TRACE                       /* debug builds: the profiler names these functions */
+#define VSTATIC
+#else
+#define VSTATIC static
+#endif
 #ifdef LOGIC_TRACE
 #ifndef VP_FROM                        /* debug: the ticks the display profile covers */
 #define VP_FROM 2000
@@ -49,7 +54,8 @@
 ULONG vprof[8], vtiles;                 /* debug: colour clocks in cell redraws, streaming, sprites, grouping, retile,
                                            edges, the whole frame; tiles drawn */
 extern uint32_t logic_frames;
-#define VP(i, x) do { ULONG t0_ = sys_now(); x; if (logic_frames >= VP_FROM && logic_frames < VP_TO) vprof[i] += sys_now() - t0_; } while (0)
+ULONG vlast[8];                         /* debug: the same parts for the last frame (the frame log) */
+#define VP(i, x) do { ULONG t0_ = sys_now(), d_; x; d_ = sys_now() - t0_; vlast[i] += d_; if (logic_frames >= VP_FROM && logic_frames < VP_TO) vprof[i] += d_; } while (0)
 #else
 #define VP(i, x) do { x; } while (0)
 #endif
@@ -107,7 +113,7 @@ static WORD up_dcol;                    /* scroll split: rows above split_row sh
                                            tiles to the right of the lower part's (0 = no scroll change) */
 static UBYTE up0, up1, lo0, lo1, bgsel;
 
-static const UBYTE *chr_tile(UBYTE tile, int row)
+VSTATIC const UBYTE *chr_tile(UBYTE tile, int row)
 {
     UWORD a = (UWORD)((bgsel ? 0x1000 : 0) + tile * 16);
     UBYTE b0 = row < split_row ? up0 : lo0, b1 = row < split_row ? up1 : lo1, bank;
@@ -123,11 +129,12 @@ static UWORD nt_cell(LONG uc, int r) { return (UWORD)((((uc >> 5) & 1) << 10) | 
    never shows them, and their nametable content belongs to the other side of the wrap. A column is blanked when
    it leaves the picture and drawn when it enters it (fix_edges). */
 static UBYTE colstate[64];              /* by unwrapped column & 63: 1 drawn from the nametable, 2 drawn blank */
+#define VIDEO_BEAM_STOP 60000          /* colour clocks into the frame: stop extra drawing work here */
 static UBYTE colbank_up[64], colbank_lo[64];    /* by column: the background banks it was drawn with (retile_step) */
 static UBYTE cur_up, cur_lo;            /* the banks the background uses now, above and below the split */
 static UBYTE work_up, work_lo;          /* the banks the column being streamed was started with */
 /* the NES hides its leftmost 8 pixels when PPUMASK bit 1 is clear: the game streams new columns there */
-static int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu_mask & 2) ? 0 : 8) && x < cam_ux + 256; }
+VSTATIC int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu_mask & 2) ? 0 : 8) && x < cam_ux + 256; }
 
 /* Each tile row is in the buffer twice (y and y + 240) so that any vertical scroll shows 240 contiguous lines,
    but only the copies the current scroll shows are kept up to date: rowcopies[r] bit 0 = the copy at y,
@@ -135,10 +142,10 @@ static int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu
 static UBYTE rowcopies[30];
 static UBYTE row_need(int r, int sy) { return (UBYTE)((8 * r + 8 > sy ? 1 : 0) | (8 * r < sy ? 2 : 0)); }
 
-static void draw_tile_copies(LONG uc, int r, UBYTE copies);
-static void draw_tile(LONG uc, int r) { draw_tile_copies(uc, r, rowcopies[r]); }
+VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies);
+VSTATIC void draw_tile(LONG uc, int r) { draw_tile_copies(uc, r, rowcopies[r]); }
 
-static void draw_tile_copies(LONG uc, int r, UBYTE copies)
+VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies)
 {
     LONG sc = r < split_row ? uc + up_dcol : uc;          /* the nametable column this screen column shows */
     UWORD cell = nt_cell(sc, r), base = cell & 0x400;
@@ -168,30 +175,44 @@ static void want_cols(LONG *lo, LONG *hi)
 
 static void invalidate(void) { col_lo = 1; col_hi = 0; work_row = -1; }
 
-/* make every row's copies match what the scroll position sy shows */
-static void sync_rows(int sy)
+/* make every row's copies match what the scroll position sy shows; a big jump (a camera cut) is spread over
+   frames by time_left(): returns 0 while rows are still missing (the picture stays black meanwhile) */
+static int time_left(int done);
+VSTATIC int sync_rows(int sy)
 {
-    int r;
+    int r, done = 0;
     LONG uc;
     for (r = 0; r < 30; r++) {
         UBYTE need = row_need(r, sy), missing = (UBYTE)(need & ~rowcopies[r]);
         if (missing && col_lo <= col_hi) {
+            if (!time_left(done)) return 0;
             for (uc = col_lo; uc <= col_hi; uc++) draw_tile_copies(uc, r, missing);
             if (work_row > r) draw_tile_copies(work_col, r, missing);
+            done += (int)(col_hi - col_lo + 1);
         }
         rowcopies[r] = need;
     }
+    return 1;
 }
 
-/* draw up to n tiles of the columns that are needed but not drawn yet */
-static void stream_cols(int n)
+/* Work that may use the rest of the frame (a new screen being drawn while the picture is black): go on while
+   the beam has not reached VIDEO_BEAM_STOP colour clocks into the frame, leaving time for the sound and the
+   vertical blank. The host harness has no beam: there it is a fixed number of tiles. */
+#ifdef __m68k__
+static int time_left(int done) { return done < 40 || sys_beam() < VIDEO_BEAM_STOP; }
+#else
+static int time_left(int done) { return done < 400; }
+#endif
+
+VSTATIC void stream_cols(int n)          /* n tiles; n < 0: as many as time_left() allows */
 {
+    int done = 0;
     LONG lo, hi;
     want_cols(&lo, &hi);
     if (col_lo > col_hi) { col_lo = (lo + hi) / 2; col_hi = col_lo - 1; work_row = -1; }
     if (col_lo < lo - 2) col_lo = lo - 2;                 /* forget columns far behind */
     if (col_hi > hi + 2) col_hi = hi + 2;
-    while (n > 0) {
+    while (n < 0 ? time_left(done) : n > 0) {
         if (work_row < 0) {
             if (col_hi < hi) work_col = col_hi + 1;
             else if (col_lo > lo) work_col = col_lo - 1;
@@ -202,7 +223,7 @@ static void stream_cols(int n)
         if (work_row == 0) { work_up = cur_up; work_lo = cur_lo; }
         else if (work_up != cur_up || work_lo != cur_lo) { work_row = 0; work_up = cur_up; work_lo = cur_lo; }  /* the bank changed */
         draw_tile(work_col, work_row);
-        n--;
+        n--; done++;
         if (++work_row == 30) {
             colbank_up[work_col & 63] = cur_up; colbank_lo[work_col & 63] = cur_lo;
             if (work_col > col_hi) col_hi = work_col; else col_lo = work_col;
@@ -213,7 +234,7 @@ static void stream_cols(int n)
 
 /* columns that crossed the edge of the NES picture since they were drawn: blank the ones that left it (their
    nametable cells now belong to the other side of the wrap), draw the ones that came into it */
-static void fix_edges(void)
+VSTATIC void fix_edges(void)
 {
     LONG uc;
     int r;
@@ -227,7 +248,7 @@ static void fix_edges(void)
 }
 
 /* the NES changed nametable cell i: redraw it where it is on screen (or the 16 tiles of an attribute cell) */
-static int redraw_cell(UWORD i)
+VSTATIC int redraw_cell(UWORD i)
 {
     LONG uc0 = col_lo, uc;
     int r, c, cnt = 0;
@@ -260,7 +281,7 @@ static UBYTE bg_bank(UBYTE b0, UBYTE b1)
    columns a frame up to date, drawing only the cells whose tile looks different in the new bank. */
 static LONG retile_at;                  /* where retile_step() goes on */
 
-static const UBYTE *bank_diff(UBYTE ob, UBYTE nb)       /* diff[t] != 0: tile t differs between the banks */
+VSTATIC const UBYTE *bank_diff(UBYTE ob, UBYTE nb)       /* diff[t] != 0: tile t differs between the banks */
 {
     static UBYTE diff[4][256], key_o[4] = { 0xff, 0xff, 0xff, 0xff }, key_n[4] = { 0xff, 0xff, 0xff, 0xff }, next;
     int k, t;
@@ -272,7 +293,15 @@ static const UBYTE *bank_diff(UBYTE ob, UBYTE nb)       /* diff[t] != 0: tile t 
     return diff[k];
 }
 
-static int retile_col(LONG uc)
+static int diff_count(UBYTE ob, UBYTE nb)
+{
+    const UBYTE *d = bank_diff(ob, nb);
+    int t, n = 0;
+    for (t = 0; t < 256; t++) n += d[t];
+    return n;
+}
+
+VSTATIC int retile_col(LONG uc)
 {
     int r, n = 0, c = uc & 63;
     if (colstate[c] != 2) {
@@ -289,12 +318,17 @@ static int retile_col(LONG uc)
     return n;
 }
 
-static void retile_step(int budget)
+#ifdef __m68k__
+static int spare_time(void) { return sys_beam() < VIDEO_BEAM_STOP - 8000; }   /* the frame still has room */
+#else
+static int spare_time(void) { return 0; }
+#endif
+VSTATIC void retile_step(int budget)
 {
     LONG n = col_hi - col_lo + 1, k;
     if (n <= 0) return;
     if (retile_at < col_lo || retile_at > col_hi) retile_at = col_lo;
-    for (k = 0; k < n && budget > 0; k++) {
+    for (k = 0; k < n && (budget > 0 || spare_time()); k++) {
         int c = retile_at & 63;
         if (colbank_up[c] != cur_up || colbank_lo[c] != cur_lo) budget -= 1 + retile_col(retile_at);
         if (++retile_at > col_hi) retile_at = col_lo;
@@ -323,8 +357,11 @@ static Chan chan[4];                    /* 0..2: attached pairs (sprites 0/1, 2/
 static UBYTE *spr_mem[2][7];            /* two sets of sprite lists, swapped every frame */
 static int spr_set;
 int video_sprites_dropped;
+#ifndef __m68k__
+unsigned long vstat[3];                 /* host harness: groups kept in place, copied, drawn */
+#endif
 
-static void build_groups(void)
+VSTATIC void build_groups(void)
 {
     int i, j, k;
     WORD sh = (ppu_ctrl & 0x20) ? 16 : 8;      /* 8x16 sprites (PPUCTRL bit 5) */
@@ -367,7 +404,7 @@ static void build_groups(void)
         }
 }
 
-static int try_place(Chan *c, Group *g)
+VSTATIC int try_place(Chan *c, Group *g)
 {
     if (c->n >= NSEG) return 0;
     if (c->n && c->seg[c->n - 1]->y1 + 1 > g->y0) return 0;
@@ -375,7 +412,7 @@ static int try_place(Chan *c, Group *g)
     return 1;
 }
 
-static void assign(void)
+VSTATIC void assign(void)
 {
     int i, j, k;
     Group *order[64];
@@ -395,7 +432,7 @@ static void assign(void)
 }
 
 /* draw the NES sprites of group g into one segment's lines: e = even sprite lines, o = odd sprite lines */
-static void render_group(Group *g, UBYTE *e, UBYTE *o)
+VSTATIC void render_group(Group *g, UBYTE *e, UBYTE *o)
 {
     int k;
     for (k = g->n - 1; k >= 0; k--) {           /* highest OAM index first: lower numbers end on top */
@@ -418,7 +455,7 @@ static void render_group(Group *g, UBYTE *e, UBYTE *o)
     }
 }
 
-static void clear_lines(UBYTE *p, int n)
+VSTATIC void clear_lines(UBYTE *p, int n)
 {
     ULONG *l = (ULONG *)p;
     for (n >>= 4; n; n--) { l[0] = 0; l[1] = 0; l[2] = 0; l[3] = 0; l += 4; }
@@ -432,7 +469,7 @@ typedef struct { ULONG sig; UWORD n; UBYTE *e, *o; } Cached;
 static Cached cache[2][4 * NSEG];
 static int ncache[2];
 
-static ULONG group_sig(Group *g, int with_o)
+VSTATIC ULONG group_sig(Group *g, int with_o)
 {
     ULONG h = (ULONG)g->n * 0x9e3779b1UL ^ (ULONG)(g->y1 - g->y0) ^ ((ULONG)with_o << 31) ^ ((ULONG)(ppu_ctrl & 0x28) << 20);
     int k;
@@ -449,13 +486,13 @@ static ULONG group_sig(Group *g, int with_o)
     return h;
 }
 
-static void copy_lines(UBYTE *d, const UBYTE *s, int n)
+VSTATIC void copy_lines(UBYTE *d, const UBYTE *s, int n)
 {
     ULONG *l = (ULONG *)d; const ULONG *m = (const ULONG *)s;
     for (n >>= 4; n; n--) { l[0] = m[0]; l[1] = m[1]; l[2] = m[2]; l[3] = m[3]; l += 4; m += 4; }
 }
 
-static void build_sprites(void)
+VSTATIC void build_sprites(void)
 {
     static Cached held[4 * NSEG];       /* what this set of lists holds now (written two frames ago) */
     int k, s, n, nheld;
@@ -493,6 +530,9 @@ static void build_sprites(void)
                 for (j = 0; j < nheld; j++)     /* the same lines are already here: nothing to write */
                     if (held[j].e == e + 16 && held[j].sig == sig && held[j].n == n && !held[j].o == !o) { same = 1; break; }
                 if (!same) for (j = 0; j < ncache[spr_set ^ 1]; j++) if (cp[j].sig == sig && cp[j].n == n && !cp[j].o == !o) { hit = &cp[j]; break; }
+#ifndef __m68k__
+                {   extern unsigned long vstat[3]; vstat[same ? 0 : hit ? 1 : 2]++; }
+#endif
                 if (same) ;
                 else if (hit) {
                     copy_lines(e + 16, hit->e, n);
@@ -555,7 +595,10 @@ void video_start(void)
 
 void video_frame(void)
 {
-    int on = (ppu_mask & 0x18) != 0, budget = 0, i;
+#ifdef LOGIC_TRACE
+    { int k_; for (k_ = 0; k_ < 8; k_++) vlast[k_] = 0; }
+#endif
+    int on = (ppu_mask & 0x18) != 0, budget = 0, i, rows_ok = 1, nes_ndirty_big;
     LONG vlo, vhi;
     WORD sx = (WORD)((((ppu_t & 0x1f) << 3) | ppu_fx) + ((ppu_t >> 10) & 1) * 256);
     UWORD vt = split_on ? split_t : ppu_t;      /* a $2005 write after the split cannot change the vertical scroll */
@@ -593,22 +636,30 @@ void video_frame(void)
     }
     {   /* the 4 KB bank the background tiles come from, above and below the split */
         UBYTE mode = (UBYTE)(mmc_ctrl & 0x10);
+        UBYTE pu = cur_up, pl = cur_lo;
+        int big = 0;
         cur_up = bg_bank(up0, up1); cur_lo = bg_bank(lo0, lo1);
-        if (nes_redraw_all || bgsel != drawn_bgsel || nsplit != drawn_split || mode != drawn_mode) {
+        if (pu != cur_up && diff_count(pu, cur_up) > 64) big = 1;     /* another tile set, not an animation: */
+        if (pl != cur_lo && diff_count(pl, cur_lo) > 64) big = 1;     /* draw everything again               */
+        if (big || nes_redraw_all || bgsel != drawn_bgsel || nsplit != drawn_split || mode != drawn_mode) {
             drawn_bgsel = bgsel; drawn_split = nsplit; drawn_mode = mode;
             nes_redraw_all = 0;
             invalidate();
         }
     }
 
-    VP(1, sync_rows(sy));
+    VP(1, rows_ok = sync_rows(sy));
 
 #ifndef __m68k__
     if (getenv("VDEBUG")) printf("tiles %d ", host_tiles), host_tiles = 0;
     if (getenv("VDEBUG")) printf("vf chr %02x/%02x ctrl %02x sx %d sy %d cam %ld ndirty %d redraw_all %d split %d dcol %d cols %ld..%ld\n", mmc_chr0, mmc_chr1, ppu_ctrl, sx, sy, (long)cam_ux, nes_ndirty, nes_redraw_all, split_on, dcol, (long)col_lo, (long)col_hi), (void)0;
 #endif
     /* nametable cells the game wrote (a whole new screen: draw it again column by column) */
-    if (nes_ndirty > 200) invalidate();
+    {   int est = 0;                            /* tiles the changes would draw: an attribute cell is 16 */
+        for (i = 0; i < nes_ndirty && est <= 300; i++) est += (nes_dirty[i] & 0x3ff) >= 0x3c0 ? 16 : 1;
+        if (est > 300) nes_ndirty_big = 1; else nes_ndirty_big = 0;
+    }
+    if (nes_ndirty_big) invalidate();
     else if (col_lo <= col_hi)
         VP(0, for (i = 0; i < nes_ndirty; i++) budget -= redraw_cell(nes_dirty[i]));
     for (i = 0; i < nes_ndirty; i++) nes_dirty_flag[nes_dirty[i]] = 0;
@@ -616,10 +667,10 @@ void video_frame(void)
     /* while the visible part is incomplete (a new screen), show black and draw quickly, as the NES's own
        screen changes do; otherwise a few tiles a frame keep ahead of the scrolling */
     want_cols(&vlo, &vhi);
-    budget = (on && col_lo <= vlo && col_hi >= vhi) ? 24 : 110;
+    budget = (on && col_lo <= vlo && col_hi >= vhi) ? 24 : -1;
     VP(1, stream_cols(budget));
     VP(4, retile_step(on ? 8 : 400));
-    if (!(col_lo <= vlo && col_hi >= vhi)) on = 0;
+    if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
     VP(5, if (col_lo <= col_hi) fix_edges());
 
     if (nes_pal_dirty || on != was_on) { set_palette(on); nes_pal_dirty = 0; was_on = (UBYTE)on; }

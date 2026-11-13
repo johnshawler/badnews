@@ -16,6 +16,8 @@
 void game_init(void);                           /* before the first tick: ROM pointers, the coroutine */
 void game_tick(unsigned short input);           /* one NES frame (1/60 s) of game logic */
 unsigned short game_bench_input(unsigned int tick);
+int  game_tick_ahead(unsigned short input);     /* run the next tick now (idle time); game_tick() then only counts it */
+extern unsigned logic_calls;                    /* game_tick() calls so far */
 uint32_t game_checksum(void);
 
 extern uint8_t logic_extra_pad;                 /* NES buttons from the keyboard, ORed into every tick */

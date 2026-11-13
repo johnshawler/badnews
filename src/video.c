@@ -21,6 +21,7 @@
 #include "disp.h"
 #include "nes.h"
 #include "video.h"
+#include "logic.h"
 #ifndef __m68k__
 #include <stdio.h>                      /* host harness tools/vhost.c: VDEBUG=1 prints the state per frame */
 #include <stdlib.h>
@@ -124,6 +125,7 @@ static UWORD nt_cell(LONG uc, int r) { return (UWORD)((((uc >> 5) & 1) << 10) | 
 static UBYTE colstate[64];              /* by unwrapped column & 63: 1 drawn from the nametable, 2 drawn blank */
 static UBYTE colbank_up[64], colbank_lo[64];    /* by column: the background banks it was drawn with (retile_step) */
 static UBYTE cur_up, cur_lo;            /* the banks the background uses now, above and below the split */
+static UBYTE work_up, work_lo;          /* the banks the column being streamed was started with */
 /* the NES hides its leftmost 8 pixels when PPUMASK bit 1 is clear: the game streams new columns there */
 static int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu_mask & 2) ? 0 : 8) && x < cam_ux + 256; }
 
@@ -197,6 +199,8 @@ static void stream_cols(int n)
             work_row = 0;
             colstate[work_col & 63] = col_visible(work_col) ? 1 : 2;
         }
+        if (work_row == 0) { work_up = cur_up; work_lo = cur_lo; }
+        else if (work_up != cur_up || work_lo != cur_lo) { work_row = 0; work_up = cur_up; work_lo = cur_lo; }  /* the bank changed */
         draw_tile(work_col, work_row);
         n--;
         if (++work_row == 30) {
@@ -460,6 +464,10 @@ static void build_sprites(void)
     memcpy(held, cache[spr_set], (size_t)nheld * sizeof *held);
     ncache[spr_set] = 0;
     VP(3, { build_groups(); assign(); });
+#ifndef __m68k__
+    if (getenv("VGROUPS")) { int q, r2; for (q = 0; q < 4; q++) for (r2 = 0; r2 < chan[q].n; r2++) { Group *gg = chan[q].seg[r2];
+        fprintf(stderr, "t%u chan %d seg %d x %d..%d y %d..%d n %d\n", (unsigned)logic_frames, q, r2, gg->x0, gg->x1, gg->y0, gg->y1, gg->n); } }
+#endif
     for (k = 0; k < 4; k++) {
         Chan *c = &chan[k];
         int ne = k < 3 ? k * 2 : 6, no = k < 3 ? k * 2 + 1 : -1;
@@ -621,6 +629,9 @@ void video_frame(void)
         static UBYTE last_oam[256], last_state[8];
         UBYTE st[8];
         st[0] = ppu_ctrl; st[1] = mmc_chr0; st[2] = mmc_chr1; st[3] = split_on; st[4] = split_chr0; st[5] = split_chr1; st[6] = split_line; st[7] = mmc_ctrl;
+#ifndef __m68k__
+        if (getenv("VGROUPS")) fprintf(stderr, "t%u valid %d oamdiff %d\n", (unsigned)logic_frames, spr_valid, memcmp(last_oam, nes_oam, 256) != 0);
+#endif
         if (!spr_valid || memcmp(last_oam, nes_oam, 256) || memcmp(last_state, st, 8)) {
             VP(2, build_sprites());
             memcpy(last_oam, nes_oam, 256); memcpy(last_state, st, 8); spr_valid = 1;

@@ -5,7 +5,9 @@
  * envelopes, the pulse sweep, the triangle's linear counter: the 240 Hz frame sequencer, four steps per NES
  * frame) and sets each Paula channel's period and volume. Paula plays one period of each waveform in a loop:
  *   pulse 1 -> channel 0 (left), pulse 2 -> channel 1 (right), triangle -> channel 2 (right), noise -> 3 (left)
- * The game uses no sample (DMC) channel. Nothing here changes the game state, so checksums are unaffected.
+ * DMC samples: converted on the host (tools/dmc.py, the list in tools/games/<game>.py) and linked into chip RAM;
+ * a started sample takes Paula channel 3 from the noise for as long as it plays.
+ * Nothing here changes the game state, so checksums are unaffected.
  * Paula's registers are written directly: the kit's ptplayer plays modules and one-shot samples, not tones.
  */
 #include <proto/exec.h>
@@ -40,6 +42,25 @@ static UBYTE on;
 static UWORD cur_per[4], cur_vol[4];
 static BYTE *cur_ptr[4];
 
+extern UBYTE nes_dmc[];                 /* assets/dmc.bin: 16 entries of 16 bytes, then the samples (src/data.s) */
+static BYTE *silence;                   /* 2 zero bytes: what channel 3 loops after a sample */
+static UBYTE dmc_state;                 /* 0 channel 3 plays the noise, 1 its DMA is off, 2 sample started, 3 playing */
+static const UBYTE *dmc_e;
+static WORD dmc_ticks;                  /* ticks the sample still plays */
+
+static const UBYTE *dmc_find(UBYTE addr, UBYTE len)
+{
+    int i;
+    for (i = 0; i < 16; i++) {
+        const UBYTE *e = nes_dmc + i * 16;
+        if (!e[6] && !e[7] && !e[8] && !e[9]) break;              /* no more entries */
+        if (e[0] == addr && e[1] == len) return e;
+    }
+    return 0;
+}
+#define BE16(p) ((UWORD)((p)[0] << 8 | (p)[1]))
+#define BE32(p) ((ULONG)(p)[0] << 24 | (ULONG)(p)[1] << 16 | (ULONG)(p)[2] << 8 | (p)[3])
+
 int sound_load(void)
 {
     int d, i;
@@ -48,6 +69,7 @@ int sound_load(void)
         if (!(wave_pulse[d] = sys_alloc(8, MEMF_CHIP))) return 0;
         for (i = 0; i < 8; i++) wave_pulse[d][i] = (duty_seq[d] & (0x80 >> i)) ? 60 : -60;
     }
+    if (!(silence = sys_alloc(4, MEMF_CHIP | MEMF_CLEAR))) return 0;
     if (!(wave_tri = sys_alloc(16, MEMF_CHIP))) return 0;
     for (i = 0; i < 16; i++) wave_tri[i] = (BYTE)((i < 8 ? 15 - 2 * i : 2 * i - 17) * 8);
     for (d = 0; d < 2; d++) {                   /* NES noise: 15-bit LFSR, feedback from bit 1 (long) or bit 6 */
@@ -80,6 +102,7 @@ void sound_start(void)
     set_chan(3, wave_noise[0], NOISE_LEN / 2, 400, 0);
     PAULA->dmacon = DMAF_SETCLR | DMAF_AUD0 | DMAF_AUD1 | DMAF_AUD2 | DMAF_AUD3;
     last_frame = logic_frames;
+    dmc_state = 0;
     on = 1;
 }
 
@@ -165,7 +188,31 @@ void sound_frame(void)
         /* 16 samples a period (the NES has 32 steps) */
         set_chan(2, wave_tri, 8, (UWORD)((PAULA_CLOCK * 2 / 1000 * (t + 1)) / (NES_CLOCK / 1000)), mute ? 0 : 40);
     }
-    {   UBYTE r0 = apu_reg[12], r2 = apu_reg[14];
+    /* DMC: a sample started ($4015 bit 4) takes channel 3: DMA off this frame, the sample from the next one, then
+       silence as its loop; the channel goes back to the noise when the sample's time is over */
+    switch (dmc_state) {
+    case 1:
+        PAULA->aud[3].ac_ptr = (UWORD *)(nes_dmc + BE32(dmc_e + 4)); PAULA->aud[3].ac_len = BE16(dmc_e + 8);
+        PAULA->aud[3].ac_per = BE16(dmc_e + 10); PAULA->aud[3].ac_vol = 50;
+        PAULA->dmacon = DMAF_SETCLR | DMAF_AUD3;
+        dmc_ticks = (WORD)(BE16(dmc_e + 12) * 6 / 5 + 1);
+        dmc_state = 2;
+        break;
+    case 2:
+        PAULA->aud[3].ac_ptr = (UWORD *)silence; PAULA->aud[3].ac_len = 1;
+        dmc_state = 3;
+        /* fall through */
+    case 3:
+        dmc_ticks -= (WORD)ticks;
+        if (dmc_ticks <= 0 || !(en & 0x10)) { dmc_state = 0; cur_ptr[3] = 0; cur_per[3] = 0; cur_vol[3] = 0xffff; }
+        break;
+    }
+    if ((trig & 0x10) && (en & 0x10) && (dmc_e = dmc_find(apu_reg[0x12], apu_reg[0x13])) != 0) {
+        PAULA->dmacon = DMAF_AUD3;
+        dmc_state = 1;
+    }
+    if (dmc_state == 0 && !cur_ptr[3]) PAULA->dmacon = DMAF_SETCLR | DMAF_AUD3;    /* back from a sample */
+    if (dmc_state == 0) {   UBYTE r0 = apu_reg[12], r2 = apu_reg[14];
         UWORD vol = (r0 & 0x10) ? (r0 & 15) : noise.env_vol;
         /* one sample per LFSR step */
         set_chan(3, wave_noise[(r2 & 0x80) ? 1 : 0], NOISE_LEN / 2,

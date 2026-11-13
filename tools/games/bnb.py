@@ -147,3 +147,8 @@ HLE[(0, 0x8012)] = '''
     add.b d3,d3
     tst.b d0'''
 HLE_FALLBACK.add((0, 0x8012))
+
+# DMC samples the game plays (the voice), as (rate $4010 & 15, $4012, $4013, $4011) when $4015 bit 4 starts one.
+# Found by printing apu_reg whenever apu_trig bit 4 was set over 30,000 ticks of the bench (four samples, all at
+# the fastest rate, level 0 at the start). tools/dmc.py converts them; src/sound.c plays them.
+DMC = [(0x0f, 0xc4, 0x68, 0), (0x0f, 0xa0, 0x88, 0), (0x0f, 0xe0, 0x70, 0), (0x0f, 0x83, 0x76, 0)]

@@ -2,6 +2,7 @@
 # Usage: tools/make_assets.sh
 # Makes everything the build needs from the original ROM (original/$GAME.nes, GAME in port.conf), with no manual step:
 #   assets/prg.bin, assets/chr.bin   the program and graphics ROMs, split from the iNES file
+#   assets/dmc.bin                   the game's DMC samples as Paula samples (tools/dmc.py)
 #   src/gen_*.c, src/gen_code.h      the game's 6502 code translated to C by tools/recomp.py
 # The flow files in tools/flow/ (entry points seen while tracing the game with tools/nesref) seed the translation.
 set -e
@@ -20,5 +21,6 @@ assert d[4] == 8 and d[5] == 16 and mapper == 1, ('only 128K PRG + 128K CHR MMC1
 open('assets/prg.bin', 'wb').write(d[16:16 + 0x20000])
 open('assets/chr.bin', 'wb').write(d[16 + 0x20000:16 + 0x40000])
 PY
+python3 -I tools/dmc.py "$ROM" "$GAME" assets/dmc.bin       # the game's DMC samples (tools/games/$GAME.py: DMC)
 FLOWS=$(ls tools/flow/*.txt 2>/dev/null | grep -v "_input.txt" || true)    # traces from tools/nesref -c; none is fine to start
 python3 tools/recomp.py --game "$GAME" "$ROM" src $FLOWS

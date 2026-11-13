@@ -51,6 +51,7 @@ static void shot(const char *name)
             UWORD pos = (UWORD)(d[0] << 8 | d[1]), ctl = (UWORD)(d[8] << 8 | d[9]);
             int vs = pos >> 8, ve = ctl >> 8, hs = ((pos & 0xff) << 1) | (ctl & 1), l;
             if (!pos && !ctl) break;
+            if (getenv("SEGS")) fprintf(stderr, "spr %d seg pos %04x ctl %04x\n", n, pos, ctl);
             vs |= (ctl & 4) << 6; ve |= (ctl & 2) << 7;
             if (ve <= vs) { fprintf(stderr, "sprite %d: bad segment vs %d ve %d\n", n, vs, ve); break; }
             for (l = 0; l < ve - vs; l++) for (x = 0; x < 64; x++) {

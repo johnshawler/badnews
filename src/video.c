@@ -113,14 +113,6 @@ static WORD up_dcol;                    /* scroll split: rows above split_row sh
                                            tiles to the right of the lower part's (0 = no scroll change) */
 static UBYTE up0, up1, lo0, lo1, bgsel;
 
-VSTATIC const UBYTE *chr_tile(UBYTE tile, int row)
-{
-    UWORD a = (UWORD)((bgsel ? 0x1000 : 0) + tile * 16);
-    UBYTE b0 = row < split_row ? up0 : lo0, b1 = row < split_row ? up1 : lo1, bank;
-    if (mmc_ctrl & 0x10) bank = (a < 0x1000) ? b0 : b1;
-    else bank = (UBYTE)((b0 & 0x1e) | (a >> 12));
-    return nes_chr_data + (ULONG)(bank & 31) * 0x1000 + (a & 0xfff);
-}
 
 /* nametable cell of unwrapped column uc, row r (vertical mirroring: two nametables side by side) */
 static UWORD nt_cell(LONG uc, int r) { return (UWORD)((((uc >> 5) & 1) << 10) | (r << 5) | (uc & 31)); }
@@ -132,7 +124,9 @@ static UBYTE colstate[64];              /* by unwrapped column & 63: 1 drawn fro
 #define VIDEO_BEAM_STOP 60000          /* colour clocks into the frame: stop extra drawing work here */
 static UBYTE colbank_up[64], colbank_lo[64];    /* by column: the background banks it was drawn with (retile_step) */
 static UBYTE cur_up, cur_lo;            /* the banks the background uses now, above and below the split */
-static UBYTE work_up, work_lo;          /* the banks the column being streamed was started with */
+static UBYTE work_up, work_lo;
+static UBYTE filling;                   /* the picture is black because the screen is still being drawn */
+static WORD fill_sy;          /* the banks the column being streamed was started with */
 /* the NES hides its leftmost 8 pixels when PPUMASK bit 1 is clear: the game streams new columns there */
 VSTATIC int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu_mask & 2) ? 0 : 8) && x < cam_ux + 256; }
 
@@ -152,7 +146,7 @@ VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies)
     UBYTE tile = nes_vram[cell], tx = (UBYTE)(sc & 31);
     UBYTE attr = nes_vram[base | 0x3c0 | ((r >> 2) << 3) | (tx >> 2)];
     UBYTE pal = (UBYTE)((attr >> (((r & 2) << 1) | (tx & 2))) & 3);
-    const UBYTE *src = chr_tile(tile, r);
+    const UBYTE *src = nes_chr_data + ((ULONG)(r < split_row ? cur_up : cur_lo) << 12) + (UWORD)tile * 16;   /* bg_bank() */
     UBYTE p2 = (pal & 1) ? 0xff : 0, p3 = (pal & 2) ? 0xff : 0;
     LONG x = uc * 8;
     UBYTE *d;
@@ -199,9 +193,11 @@ VSTATIC int sync_rows(int sy)
    the beam has not reached VIDEO_BEAM_STOP colour clocks into the frame, leaving time for the sound and the
    vertical blank. The host harness has no beam: there it is a fixed number of tiles. */
 #ifdef __m68k__
-static int time_left(int done) { return done < 8 || sys_beam() < VIDEO_BEAM_STOP; }
+static ULONG beam_stop = VIDEO_BEAM_STOP;
+static int time_left(int done) { return done < 8 || sys_beam() < beam_stop; }
 #else
-static int time_left(int done) { return done < 400; }
+static ULONG beam_stop;
+static int time_left(int done) { return done < (beam_stop < 40000 ? 150 : 250); }
 #endif
 
 VSTATIC void stream_cols(int n)          /* n tiles; n < 0: as many as time_left() allows */
@@ -364,7 +360,36 @@ unsigned long vstat[3];                 /* host harness: groups kept in place, c
 #endif
 
 static Group *gp[64];                    /* the groups, in OAM order: pointers, so a merge moves no structure */
+#ifdef __m68k__
+int build_groups68(Group **g __asm("a0"), Group *pool __asm("a1"), const UBYTE *oam __asm("a2"), int sh __asm("d0"));
+VSTATIC void build_groups_c(void);
+#ifdef LOGIC_TRACE
+ULONG vgroup_checks, vgroup_diffs;      /* debug: the assembly clustering compared with the C one every frame */
+static Group grp_c[64], *gp_c[64];
+#endif
 VSTATIC void build_groups(void)
+{
+    ngrp = build_groups68(gp, grp, nes_oam, (ppu_ctrl & 0x20) ? 16 : 8);    /* video68k.s */
+#ifdef LOGIC_TRACE
+    {   Group *sg = grp, **sp = gp; Group *keep[64]; int k, n68 = ngrp, bad = 0;
+        static Group copy[64];
+        for (k = 0; k < n68; k++) { copy[k] = *gp[k]; keep[k] = gp[k]; }
+        build_groups_c();                   /* into the same pool: compare, then put the assembly result back */
+        if (ngrp != n68) bad = 1;
+        for (k = 0; !bad && k < n68; k++) {
+            Group *a = &copy[k], *b = gp[k];
+            if (a->x0 != b->x0 || a->x1 != b->x1 || a->y0 != b->y0 || a->y1 != b->y1 || a->n != b->n
+                || !a->pal3only != !b->pal3only || memcmp(a->idx, b->idx, a->n)) bad = 1;
+        }
+        for (k = 0; k < n68; k++) { gp[k] = keep[k]; *gp[k] = copy[k]; }
+        ngrp = n68; vgroup_checks++; vgroup_diffs += bad; (void)sg; (void)sp; (void)grp_c; (void)gp_c;
+    }
+#endif
+}
+VSTATIC void build_groups_c(void)
+#else                                   /* the same in C, for the host harness tools/vhost.c */
+VSTATIC void build_groups(void)
+#endif
 {
     int i, j, k, n = 0, nfree = 0;
     WORD sh = (ppu_ctrl & 0x20) ? 16 : 8;      /* 8x16 sprites (PPUCTRL bit 5) */
@@ -387,7 +412,7 @@ VSTATIC void build_groups(void)
         if (j >= n) {
             Group *g = gp[n++] = &grp[nfree++];
             g->x0 = x; g->x1 = (WORD)(x + 8); g->y0 = sy; g->y1 = (WORD)(sy + sh); g->n = 1; g->idx[0] = (UBYTE)i;
-            g->pal3only = (o[2] & 3) == 3;
+            g->pal3only = (o[2] & 3) == 3;          /* 0 or 1, as video68k.s */
         }
     }
     /* merge groups that touch, while they fit */
@@ -657,6 +682,7 @@ void video_frame(void)
         }
     }
 
+    beam_stop = 30000;                          /* black: draw a part now, more in video_idle() after the logic */
     VP(1, rows_ok = sync_rows(sy));
 
 #ifndef __m68k__
@@ -681,6 +707,7 @@ void video_frame(void)
     VP(1, stream_cols(budget));
     if (!on) VP(4, retile_step(400));          /* black anyway: catch up now; else video_idle() does it */
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
+    filling = !on && (ppu_mask & 0x18); fill_sy = sy;
     {   static LONG e_cam = -1, e_lo, e_hi; static UBYTE e_mask;     /* columns cross the edge only when these change */
         if (col_lo <= col_hi && (cam_ux != e_cam || col_lo != e_lo || col_hi != e_hi || ((ppu_mask ^ e_mask) & 2))) {
             VP(5, fix_edges());
@@ -710,5 +737,10 @@ void video_frame(void)
    (CHR-bank retile) uses whatever time is left before the vertical blank. */
 void video_idle(void)
 {
+    if (filling) {                              /* the picture is black while a screen is drawn: go on with it */
+        beam_stop = VIDEO_BEAM_STOP;
+        if (sync_rows(fill_sy)) stream_cols(-1);
+        return;
+    }
     retile_step(64);
 }

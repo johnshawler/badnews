@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nes.h"
+#include "logic.h"
 
 uint8_t nes_prg_data[0x20000], nes_chr_data[0x20000];
 void nes_wait(int kind, uint16_t pc) { (void)kind; (void)pc; }
@@ -18,6 +19,18 @@ uint16_t nes_reset_entry(void) { return 0; }
 static uint8_t A, X, Y, S = 0xfd, P = 0x24; static uint16_t PC, pc0;
 static struct { int bank; uint16_t br, loop; int kind; } waits[64]; static int nwaits;
 static int s0at[0x10000];
+/* VERIFY_COV=file: write the entry points this run reaches (indirect jumps I, unexpected returns U, calls into
+   the switchable bank X) in tools/nesref's flow format, so code that only the frame model reaches gets translated */
+static FILE *covf; static uint16_t shadow[256]; static int nshadow;
+static int bank_of(uint16_t a);
+static void flow(char kind, uint16_t to)
+{
+    static uint8_t seen[3][8][0x10000];
+    int k = kind == 'I' ? 0 : kind == 'U' ? 1 : 2, b = to >= 0x8000 ? bank_of(to) : 0;
+    if (!covf || to < 0x8000 || seen[k][b][to]) return;
+    seen[k][b][to] = 1;
+    fprintf(covf, "%c %d %04x %04x %d\n", kind, b, to, pc0, pc0 >= 0x8000 ? bank_of(pc0) : -1);
+}
 
 static int bank_of(uint16_t a) { return a >= 0xc000 ? 7 : nes_bank; }
 static uint8_t rd(uint16_t a)
@@ -43,6 +56,8 @@ static int step(void)
 {
     uint8_t op, m, lo, hi; uint16_t a = 0; int mode = 0, k;
     pc0 = PC;
+    if (covf && PC >= 0x8000) { static uint8_t ex[8][0x8000]; int b = bank_of(PC);
+        if (!ex[b][PC - 0x8000]) { ex[b][PC - 0x8000] = 1; fprintf(covf, "E %d %04x\n", b, PC); } }
     op = rd(PC++);
     switch (op & 0x1f) {
     case 0x00: case 0x02: mode = (op == 0x20) ? 4 : (op & 0x80) ? 1 : 0; break;
@@ -107,10 +122,14 @@ static int step(void)
             for (k = 0; k < nwaits; k++) if (waits[k].br == pc0 && waits[k].bank == bank_of(pc0)) return 1 + waits[k].kind;
         }
     } break;
-    case 0x4c: PC = a; break;
-    case 0x6c: PC = (uint16_t)(rd(a) | (rd((uint16_t)((a & 0xff00) | ((a + 1) & 0xff))) << 8)); break;
-    case 0x20: push((uint8_t)((PC - 1) >> 8)); push((uint8_t)(PC - 1)); PC = a; break;
-    case 0x60: PC = (uint16_t)((pop() | (pop() << 8)) + 1); break;
+    case 0x4c: PC = a; if (PC >= 0x8000 && PC < 0xc000 && pc0 >= 0xc000) flow('X', PC); break;
+    case 0x6c: PC = (uint16_t)(rd(a) | (rd((uint16_t)((a & 0xff00) | ((a + 1) & 0xff))) << 8)); flow('I', PC); break;
+    case 0x20: push((uint8_t)((PC - 1) >> 8)); push((uint8_t)(PC - 1)); if (nshadow < 256) shadow[nshadow++] = PC; PC = a;
+        if (PC >= 0x8000 && PC < 0xc000 && pc0 >= 0xc000) flow('X', PC); break;
+    case 0x60: PC = (uint16_t)((pop() | (pop() << 8)) + 1);
+        if (nshadow && shadow[nshadow - 1] == PC) nshadow--;
+        else { int k = nshadow; while (k && shadow[k - 1] != PC) k--; if (k) nshadow = k - 1; flow('U', PC); }
+        break;
     case 0x40: P = (uint8_t)((pop() & ~0x10) | 0x20); PC = (uint16_t)(pop() | (pop() << 8)); break;
     case 0x48: push(A); break; case 0x68: A = pop(); setnz(A); break;
     case 0x08: push(P | 0x30); break; case 0x28: P = (uint8_t)((pop() & ~0x10) | 0x20); break;
@@ -125,13 +144,16 @@ static int step(void)
 static unsigned short bench_input(unsigned int t)      /* copy of game_bench_input() in src/logic.c */
 {
     /* BENCH INPUT BEGIN (per game: tools/new_port.sh resets it) */
-    if (t >= 100 && t <= 105) return 64;
-    if (t >= 200 && t <= 205) return 4;
-    if (t >= 250 && t <= 255) return 16;
-    if (t >= 330 && t <= 335) return 4;
-    if (t >= 360 && t <= 365) return 4;
-    if (t >= 400 && t <= 405) return 16;
-    if (t >= 500 && (t & 127) < 4) return 16;
+    /* "Spectator mode" (computer against computer): START skips the intro, DOWN x4 picks the mode, then one
+       START per set-up screen (teams, orders, pitchers, starting members). From tick ~1500 the game plays itself:
+       pitches, hits, field play, outs, the change of sides. */
+    static const unsigned short presses[][3] = {
+        { 60, 63, IN_START }, { 150, 153, IN_DOWN }, { 180, 183, IN_DOWN }, { 210, 213, IN_DOWN }, { 240, 243, IN_DOWN },
+        { 280, 283, IN_START }, { 420, 423, IN_START }, { 570, 573, IN_START }, { 720, 723, IN_START },
+        { 870, 873, IN_START }, { 1020, 1023, IN_START }, { 1170, 1173, IN_START }, { 1320, 1323, IN_START } };
+    unsigned i;
+    for (i = 0; i < sizeof presses / sizeof presses[0]; i++)
+        if (t >= presses[i][0] && t <= presses[i][1]) return presses[i][2];
     /* BENCH INPUT END */
     return 0;
 }
@@ -158,6 +180,7 @@ int main(int argc, char **argv)
         waits[nwaits].kind = !strcmp(k, "VBL"); nwaits++;
     }
     if (f) fclose(f);
+    if (getenv("VERIFY_COV")) covf = fopen(getenv("VERIFY_COV"), "w");
     nes_init(nes_prg_data, nes_chr_data);
     PC = (uint16_t)(nes_rd(0xfffc) | nes_rd(0xfffd) << 8);
     for (t = 0; t < n; t++) {
@@ -179,5 +202,6 @@ int main(int argc, char **argv)
         fwrite(nes_ram, 1, sizeof nes_ram, log);
     }
     fclose(log);
+    if (covf) fclose(covf);
     return 0;
 }

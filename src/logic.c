@@ -93,18 +93,20 @@ void game_tick(unsigned short in)
 #endif
 }
 
-/* Bench: "Exhibition mode, watch game" (computer against computer), then a tap on A every 128 ticks to get
-   through the screens between plays. It plays pitches, hits and fielding: the busiest scenes. */
+/* Bench: the self-playing mode through the busiest scenes. */
 unsigned short game_bench_input(unsigned int t)
 {
     /* BENCH INPUT BEGIN (per game: tools/new_port.sh resets it) */
-    if (t >= 100 && t <= 105) return IN_START;
-    if (t >= 200 && t <= 205) return IN_DOWN;
-    if (t >= 250 && t <= 255) return IN_A;
-    if (t >= 330 && t <= 335) return IN_DOWN;
-    if (t >= 360 && t <= 365) return IN_DOWN;
-    if (t >= 400 && t <= 405) return IN_A;
-    if (t >= 500 && (t & 127) < 4) return IN_A;
+    /* "Spectator mode" (computer against computer): START skips the intro, DOWN x4 picks the mode, then one
+       START per set-up screen (teams, orders, pitchers, starting members). From tick ~1500 the game plays itself:
+       pitches, hits, field play, outs, the change of sides. */
+    static const unsigned short presses[][3] = {
+        { 60, 63, IN_START }, { 150, 153, IN_DOWN }, { 180, 183, IN_DOWN }, { 210, 213, IN_DOWN }, { 240, 243, IN_DOWN },
+        { 280, 283, IN_START }, { 420, 423, IN_START }, { 570, 573, IN_START }, { 720, 723, IN_START },
+        { 870, 873, IN_START }, { 1020, 1023, IN_START }, { 1170, 1173, IN_START }, { 1320, 1323, IN_START } };
+    unsigned i;
+    for (i = 0; i < sizeof presses / sizeof presses[0]; i++)
+        if (t >= presses[i][0] && t <= presses[i][1]) return presses[i][2];
     /* BENCH INPUT END */
     return 0;
 }

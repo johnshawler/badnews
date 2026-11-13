@@ -35,8 +35,9 @@ static uint8_t *cov; /* [bank*0x4000 + offs] for $8000-$BFFF, plus fixed bank */
 static FILE *covf;
 static long long instr_total;
 static int prg_bank_for(uint16_t a);
-static unsigned *prof; static FILE *proff;
+static unsigned *prof; static FILE *proff; static int prof_on = 1;   /* -p: PROF_FROM/PROF_TO limit it to frames */
 static uint16_t shadow[256]; static int nshadow;
+static unsigned splitlog[8]; static int nsplit;   /* PPU register writes while lines are drawn (-s) */
 static void flow(char kind, uint16_t from, uint16_t to)
 {
     static uint8_t *seen; long k;
@@ -114,6 +115,7 @@ static void wr(uint16_t a, uint8_t d)
     if (a < 0x4000) {
         frame_ppuw++;
         if (trace) printf("  PPU %04x <- %02x  (line %d)\n", a & 0x2007, d, scanline);
+        if (scanline >= 0 && scanline < 240 && (ppumask & 0x18) && (a & 7) != 7 && (a & 7) != 4 && (a & 7) != 3 && nsplit < 8) splitlog[nsplit++] = (scanline << 16) | ((a & 7) << 8) | d;
         switch (a & 7) {
         case 0: ppuctrl = d; t = (t & 0xf3ff) | ((d & 3) << 10); break;
         case 1: ppumask = d; break;
@@ -133,6 +135,7 @@ static void wr(uint16_t a, uint8_t d)
     if (d & 0x80) { m_shift = 0x10; m_ctrl |= 0x0c; return; }
     { int done = m_shift & 1; m_shift = (m_shift >> 1) | ((d & 1) << 4);
       if (done) { uint8_t val = m_shift; int reg = (a >> 13) & 3;
+          if (scanline >= 0 && scanline < 240 && (ppumask & 0x18) && nsplit < 8) splitlog[nsplit++] = (scanline << 16) | ((8 + reg) << 8) | val;
           if (reg == 0) m_ctrl = val; else if (reg == 1) m_chr0 = val; else if (reg == 2) m_chr1 = val; else m_prg = val;
           m_shift = 0x10; } }
 }
@@ -183,7 +186,7 @@ static void step(void)
     uint8_t op, m, lo, hi; uint16_t a = 0, pc0 = PC; int mode;
     if (nmi_pending == 1) { nmi_pending = 0; irq_nmi(0xfffa); pc0 = PC; } else if (nmi_pending) nmi_pending--;   /* NMI one instruction after the flag rises */
     if (cov) cov_mark(PC, 1);
-    if (prof) prof[(PC >= 0x8000 ? prg_bank_for(PC) : 15) * 0x10000 + PC]++;
+    if (prof && prof_on) prof[(PC >= 0x8000 ? prg_bank_for(PC) : 15) * 0x10000 + PC]++;
     op = rd(PC++);
     if (trace) printf("%02x:%04x %02x A=%02x X=%02x Y=%02x P=%02x S=%02x\n", pc0 >= 0x8000 ? prg_bank_for(pc0) : 0xff, pc0, op, A, X, Y, P, S);
     cycles += cyc[op]; instr_total++;
@@ -373,6 +376,7 @@ int main(int argc, char **argv)
         int y; char key[16];
         pad = 0; for (i = 0; i < nin; i++) if (fr >= ins[i].a && fr <= ins[i].b) pad |= ins[i].bits;
         frame_instr = frame_ppuw = frame_2002r = 0;
+        if (prof) { char *e1 = getenv("PROF_FROM"), *e2 = getenv("PROF_TO"); prof_on = (!e1 || fr >= atoi(e1)) && (!e2 || fr <= atoi(e2)); }
         if (trace) printf("---- frame %d\n", fr);
         /* pre-render line: copy vertical bits */
         ppustatus &= ~0x60;
@@ -392,7 +396,10 @@ int main(int argc, char **argv)
         scanline = 241; run_cycles(114 * 20);
         ppustatus &= 0x1f;
         scanline = -1; run_cycles(114);
-        if (stats) printf("frame %d instr %ld ppuw %ld r2002 %ld ctrl %02x mask %02x mmc %02x/%02x/%02x/%02x\n", fr, frame_instr, frame_ppuw, frame_2002r, ppuctrl, ppumask, m_ctrl, m_chr0, m_chr1, m_prg);
+        if (stats) { int k; printf("frame %d instr %ld ppuw %ld r2002 %ld ctrl %02x mask %02x mmc %02x/%02x/%02x/%02x", fr, frame_instr, frame_ppuw, frame_2002r, ppuctrl, ppumask, m_ctrl, m_chr0, m_chr1, m_prg);
+            for (k = 0; k < nsplit; k++) printf(" split@%d:%x=%02x", splitlog[k] >> 16, (splitlog[k] >> 8) & 15, splitlog[k] & 0xff);
+            printf("\n"); }
+        nsplit = 0;
         snprintf(key, sizeof key, ",%d,", fr);
         if (strstr(dumps, key)) dump(dir, fr);
     }

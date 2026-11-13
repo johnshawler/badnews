@@ -63,7 +63,13 @@ Found in the first port; look for them in every game with the profiler (`src/pro
 | Metasprite builder | `LDA (ptr),y` streams into `$0200,x` | hand-write with one pointer (template: $E2DE) |
 
 Hand-written routines: guard them (fall back to `.orig`), reproduce registers, all four flags, RAM and the
-return addresses left on the stack page, and prove them with the per-tick checksum.
+return addresses left on the stack page, and prove them with the per-tick checksum. A, X and Y must stay
+zero-extended in d0/d1/d2 (the translation indexes memory with `d1.w`): never `moveq #-1,d1` for X = $FF, use
+`move.l #$ff,d1` then `tst.b d1` for the flags (a crash in Bad News Baseball).
+
+Count the I/O per tick in the frame model, not on the reference NES: `cc -DCOUNT_IO` with a small driver gives
+reads and writes per address (Bad News Baseball: 197 MMC1 writes a tick in field play; the reference NES showed 50
+in a different scene). Bank switches dominate when a game calls code in other banks often.
 
 ## 5. Translator rules of thumb
 

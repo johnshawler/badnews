@@ -90,8 +90,10 @@ static void ppu_write(uint16_t a, uint8_t d)
     a &= 0x1f; if ((a & 0x13) == 0x10) a &= 0x0f; pal[a] = d & 0x3f;
 }
 
+static unsigned long iocount[2][0x10000]; static int io_on;   /* -p: I/O reads and writes per address */
 static uint8_t rd(uint16_t a)
 {
+    if (io_on && a >= 0x2000 && a < 0x8000) iocount[0][a]++;
     if (a < 0x2000) return ram[a & 0x7ff];
     if (a < 0x4000) {
         switch (a & 7) {
@@ -111,6 +113,7 @@ static uint8_t rd(uint16_t a)
 }
 static void wr(uint16_t a, uint8_t d)
 {
+    if (io_on && a >= 0x2000) iocount[1][a]++;   /* IOCOUNT: -p also counts I/O writes and reads per address */
     if (a < 0x2000) { ram[a & 0x7ff] = d; return; }
     if (a < 0x4000) {
         frame_ppuw++;
@@ -376,7 +379,7 @@ int main(int argc, char **argv)
         int y; char key[16];
         pad = 0; for (i = 0; i < nin; i++) if (fr >= ins[i].a && fr <= ins[i].b) pad |= ins[i].bits;
         frame_instr = frame_ppuw = frame_2002r = 0;
-        if (prof) { char *e1 = getenv("PROF_FROM"), *e2 = getenv("PROF_TO"); prof_on = (!e1 || fr >= atoi(e1)) && (!e2 || fr <= atoi(e2)); }
+        if (prof) { char *e1 = getenv("PROF_FROM"), *e2 = getenv("PROF_TO"); prof_on = (!e1 || fr >= atoi(e1)) && (!e2 || fr <= atoi(e2)); io_on = prof_on; }
         if (trace) printf("---- frame %d\n", fr);
         /* pre-render line: copy vertical bits */
         ppustatus &= ~0x60;
@@ -404,7 +407,8 @@ int main(int argc, char **argv)
         if (strstr(dumps, key)) dump(dir, fr);
     }
     if (covf) { for (i = 0; i < prg_banks * 0x4000; i++) if (cov[i] & 1) fprintf(covf, "E %d %04x\n", i / 0x4000, (i / 0x4000 == prg_banks - 1 ? 0xc000 : 0x8000) + (i & 0x3fff)); fclose(covf); }
-    if (proff) { for (i = 0; i < 16 * 0x10000; i++) if (prof[i]) fprintf(proff, "%u %x %04x\n", prof[i], i >> 16, i & 0xffff); fclose(proff); }
+    if (proff) { for (i = 0; i < 16 * 0x10000; i++) if (prof[i]) fprintf(proff, "%u %x %04x\n", prof[i], i >> 16, i & 0xffff); for (i = 0; i < 0x10000; i++) { if (iocount[0][i]) fprintf(proff, "R %lu %04x\n", iocount[0][i], i); if (iocount[1][i]) fprintf(proff, "W %lu %04x\n", iocount[1][i], i); }
+        fclose(proff); }
     fprintf(stderr, "instructions %lld\n", instr_total);
     return 0;
 }

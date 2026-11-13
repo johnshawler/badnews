@@ -101,8 +101,14 @@ static uint8_t vram_read(void)
     return r;
 }
 
+#ifdef COUNT_IO                                 /* host debugging: I/O accesses per address */
+unsigned long io_count[2][0x10000]; int io_counting;
+#endif
 uint8_t nes_io_read(uint16_t a)
 {
+#ifdef COUNT_IO
+    if (io_counting) io_count[0][a]++;
+#endif
     if (a < 0x4000) {
         switch (a & 7) {
         case 2: { uint8_t r = (uint8_t)(ppu_vbl << 7); ppu_vbl = 0; ppu_w = 0; return r; }
@@ -174,6 +180,9 @@ static void mmc1(uint16_t a, uint8_t v)
 
 void nes_write_slow(uint16_t a, uint8_t v)
 {
+#ifdef COUNT_IO
+    if (io_counting) io_count[1][a]++;
+#endif
     if (a < 0x4000) {
         switch (a & 7) {
         case 0: ppu_ctrl = v; ppu_t = (uint16_t)((ppu_t & 0xf3ff) | ((v & 3) << 10)); break;

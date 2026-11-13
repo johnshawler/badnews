@@ -198,7 +198,18 @@ int main(int argc, char **argv)
             }
             if (kind == 1) ppu_vbl = 1;
         }
-        for (;;) { int r = step(); if (r) { kind = r - 1; break; } }
+        {   long cnt = 0; static long *hist; uint16_t pcs = 0;
+            if (getenv("VERIFY_STATS") && !hist) hist = calloc(0x10000, sizeof *hist);
+            for (;;) { int r; if (hist) hist[PC]++; r = step(); cnt++; if (r) { kind = r - 1; pcs = pc0; break; } }
+            /* VERIFY_STATS=n: ticks of more than n 6502 instructions, with the most executed addresses */
+            if (hist && cnt > atol(getenv("VERIFY_STATS"))) {
+                int i, j, best[5] = {0};
+                for (i = 0; i < 0x10000; i++) for (j = 0; j < 5; j++) if (hist[i] > hist[best[j]]) { memmove(best + j + 1, best + j, (4 - j) * sizeof *best); best[j] = i; break; }
+                printf("tick %u instructions %ld (wait at %04x bank %d):", t, cnt, pcs, nes_bank);
+                for (j = 0; j < 5; j++) printf(" %04x:%ld", best[j], hist[best[j]]);
+                printf("\n");
+            }
+            if (hist) memset(hist, 0, 0x10000 * sizeof *hist); }
         fwrite(nes_ram, 1, sizeof nes_ram, log);
     }
     fclose(log);

@@ -4,7 +4,7 @@
 usage: tools/prof.py <debug-out-dir> <exe> [first_tick last_tick] [-n 40]
 
 <debug-out-dir> holds prof.bin (runtime address of reset_fn, of game_tick, then one PC per sample) and
-frames.bin (vertical blank and tick at every drawn frame). With a tick range, only the samples taken while the
+frames.bin (vertical blank, tick and display time at every drawn frame). With a tick range, only the samples taken while the
 logic was in that range count (the busiest scene, not the whole run). Symbols come from m68k-amigaos-nm of
 <exe> (run in the crosstools Docker image). The translated code (src/gen68k.s with src/nes68k.s included) is
 one hunk, placed by reset_fn; the C code is another, placed by game_tick. Samples elsewhere (other assembly
@@ -22,7 +22,7 @@ d = open(os.path.join(out, 'prof.bin'), 'rb').read()
 base, cbase = struct.unpack('>II', d[:8])
 pcs = struct.unpack('>%dI' % ((len(d) - 8) // 4), d[8:])
 f = open(os.path.join(out, 'frames.bin'), 'rb').read()
-fr = [struct.unpack('>II', f[i:i + 8]) for i in range(0, len(f) - 7, 8)]      # (vblank, tick) per drawn frame
+fr = [struct.unpack('>III', f[i:i + 12]) for i in range(0, len(f) - 11, 12)]      # (vblank, tick) per drawn frame
 
 nm = subprocess.run(['docker', 'run', '--rm', '-v', os.getcwd() + ':/work', '-w', '/work', 'amigadev/crosstools:m68k-amigaos',
                      'm68k-amigaos-nm', exe], capture_output=True, text=True).stdout
@@ -51,7 +51,7 @@ cend = cstart + csym[-1][0] + 0x1000
 
 # samples come at 1 kHz from the start of the game, vertical blanks at 50 Hz: sample k falls in vertical blank
 # k / 20, and frames.bin says which tick the logic had reached by then
-fv = [v for v, t in fr]
+fv = [x[0] for x in fr]
 def tick_of(k):
     i = bisect.bisect_right(fv, k // 20) - 1
     return fr[i][1] if i >= 0 else 0

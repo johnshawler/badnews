@@ -9,7 +9,7 @@
         xdef    _dispatch,_unwind,_io_rd,_io_wr,_rd_ea,_wr_ea_d0,_php,_plp,_set_prg,_wait   ; for the profiler only
         xref    _cpu_a,_cpu_s,_cpu_x,_cpu_y,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
 ;       _cpu_x,_cpu_y,_cpu_s,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
-        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad
+        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig
         xref    _nes_io_read,_nes_read_s0,_nes_write_slow,_nes_wait,_nes_fatal,_nes_mmc_prg,_nes_mmc_ctrl
 
 ; ---- moving the 6502 state between the globals and the registers
@@ -320,8 +320,101 @@ _io_wr: cmpa.w  #$2007,a0               ; PPU data port: nametable writes done h
         or.b    #$10,d3
 .m1     move.b  d3,_mmc_shift
         bra     .done
-.pad    cmpa.w  #$4016,a0               ; controller strobe
-        bne     .call
+.pad    cmpa.l  #$4000,a0               ; PPU registers ($2000-$3FFF, mirrored every 8)
+        bcc     .apu
+        move.w  a0,d3
+        and.w   #7,d3
+        cmp.w   #1,d3
+        bcs     .c0
+        beq     .c1
+        cmp.w   #5,d3
+        beq     .c5
+        cmp.w   #6,d3
+        beq     .c6
+        bra     .call
+.c0     move.b  d4,_ppu_ctrl            ; as nes_write_slow() in nes.c: nametable bits into t
+        move.w  d4,d3
+        and.w   #3,d3
+        lsl.w   #8,d3
+        lsl.w   #2,d3
+        move.w  _ppu_t,d1
+        and.w   #$f3ff,d1
+        or.w    d3,d1
+        move.w  d1,_ppu_t
+        bra     .done
+.c1     move.b  d4,_ppu_mask
+        bra     .done
+.c5     tst.b   _ppu_w                  ; scroll: x (fine x, coarse x), then y
+        bne.s   .c5b
+        move.b  d4,d3
+        and.b   #7,d3
+        move.b  d3,_ppu_fx
+        move.w  d4,d3
+        lsr.w   #3,d3
+        move.w  _ppu_t,d1
+        and.w   #$ffe0,d1
+        or.w    d3,d1
+        move.w  d1,_ppu_t
+        move.b  #1,_ppu_w
+        bra     .done
+.c5b    move.w  d4,d3
+        and.w   #7,d3
+        moveq   #12,d1
+        lsl.w   d1,d3
+        move.w  d4,d1
+        and.w   #$f8,d1
+        lsl.w   #2,d1
+        or.w    d1,d3
+        move.w  _ppu_t,d1
+        and.w   #$8c1f,d1
+        or.w    d3,d1
+        move.w  d1,_ppu_t
+        clr.b   _ppu_w
+        bra     .done
+.c6     tst.b   _ppu_w                  ; address: high byte, then low byte (and v = t)
+        bne.s   .c6b
+        move.w  d4,d3
+        and.w   #$3f,d3
+        lsl.w   #8,d3
+        move.w  _ppu_t,d1
+        and.w   #$00ff,d1
+        or.w    d3,d1
+        move.w  d1,_ppu_t
+        move.b  #1,_ppu_w
+        bra     .done
+.c6b    move.w  _ppu_t,d1
+        and.w   #$ff00,d1
+        or.b    d4,d1
+        move.w  d1,_ppu_t
+        move.w  d1,_ppu_v
+        clr.b   _ppu_w
+        bra     .done
+.apu    cmpa.l  #$4018,a0               ; APU registers: kept for src/sound.c, with the channel restart bits
+        bcc     .call
+        cmpa.w  #$4014,a0               ; OAM DMA: in C
+        beq     .call
+        cmpa.w  #$4016,a0
+        beq.s   .strobe
+        move.w  a0,d3
+        sub.w   #$4000,d3
+        lea     _apu_reg,a1
+        move.b  d4,(a1,d3.w)
+        cmp.w   #$15,d3
+        bne.s   .a1
+        or.b    #$10,_apu_trig
+        bra     .done
+.a1     cmp.w   #$10,d3
+        bcc     .done
+        move.w  d3,d1
+        and.w   #3,d1
+        cmp.w   #3,d1
+        bne     .done
+        lsr.w   #2,d3
+        moveq   #0,d1
+        bset    d3,d1
+        or.b    d1,_apu_trig
+        bra     .done
+.strobe                                 ; controller strobe
         move.b  d4,d3
         and.b   #1,d3
         move.b  d3,_pad_strobe

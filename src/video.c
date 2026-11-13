@@ -319,16 +319,16 @@ VSTATIC int retile_col(LONG uc)
 }
 
 #ifdef __m68k__
-static int spare_time(void) { return sys_beam() < VIDEO_BEAM_STOP - 8000; }   /* the frame still has room */
+static int spare_time(void) { return sys_beam() < 30000; }   /* room left for this and for running the next tick ahead */
 #else
-static int spare_time(void) { return 0; }
+static int spare_time(void) { static int n; return (++n & 7) != 0; }   /* host: some columns a frame */
 #endif
 VSTATIC void retile_step(int budget)
 {
     LONG n = col_hi - col_lo + 1, k;
     if (n <= 0) return;
     if (retile_at < col_lo || retile_at > col_hi) retile_at = col_lo;
-    for (k = 0; k < n && (budget > 0 || spare_time()); k++) {
+    for (k = 0; k < n && budget > 0 && spare_time(); k++) {   /* only when the frame has room */
         int c = retile_at & 63;
         if (colbank_up[c] != cur_up || colbank_lo[c] != cur_lo) budget -= 1 + retile_col(retile_at);
         if (++retile_at > col_hi) retile_at = col_lo;
@@ -669,9 +669,14 @@ void video_frame(void)
     want_cols(&vlo, &vhi);
     budget = (on && col_lo <= vlo && col_hi >= vhi) ? 24 : -1;
     VP(1, stream_cols(budget));
-    VP(4, retile_step(on ? 8 : 400));
+    VP(4, retile_step(on ? 64 : 400));
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
-    VP(5, if (col_lo <= col_hi) fix_edges());
+    {   static LONG e_cam = -1, e_lo, e_hi; static UBYTE e_mask;     /* columns cross the edge only when these change */
+        if (col_lo <= col_hi && (cam_ux != e_cam || col_lo != e_lo || col_hi != e_hi || ((ppu_mask ^ e_mask) & 2))) {
+            VP(5, fix_edges());
+            e_cam = cam_ux; e_lo = col_lo; e_hi = col_hi; e_mask = ppu_mask;
+        }
+    }
 
     if (nes_pal_dirty || on != was_on) { set_palette(on); nes_pal_dirty = 0; was_on = (UBYTE)on; }
     disp_scroll(cam_ux - VIEW_X, sy);

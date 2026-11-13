@@ -19,7 +19,10 @@ out, exe = args[0], args[1]
 t0, t1 = (int(args[2]), int(args[3])) if len(args) >= 4 else (0, 1 << 30)
 
 d = open(os.path.join(out, 'prof.bin'), 'rb').read()
-base, cbase = struct.unpack('>II', d[:8])
+if d[:4] == b'PRO3':                    # newer debug builds: also the address of tile8 (src/video68k.s)
+    base, cbase, vbase = struct.unpack('>III', d[4:16]); d = d[8:]
+else:
+    base, cbase = struct.unpack('>II', d[:8]); vbase = None
 pcs = struct.unpack('>%dI' % ((len(d) - 8) // 4), d[8:])
 f = open(os.path.join(out, 'frames.bin'), 'rb').read()
 fr = [struct.unpack('>9I', f[i:i + 36])[:3] for i in range(0, len(f) - 35, 36)]      # (vblank, tick) per drawn frame
@@ -45,6 +48,8 @@ for line in open('src/gen68k.s'):
     if line.startswith('_reset_fn:'): reset_name = line.split()[-1]; break
 gbase = base - goff[reset_name]
 cofs = dict((n, a) for a, n in csym)
+allsym = dict((p[2], int(p[0], 16)) for p in (l.split() for l in nm.split('\n')) if len(p) == 3)
+vofs_spr = allsym.get('_spr_put', 0x40) - allsym.get('_tile8', 0)     # both in src/video68k.s's own hunk
 cstart = cbase - cofs['_game_tick']
 gend = gbase + (gen[-1][0] + 0x4000)
 cend = cstart + csym[-1][0] + 0x1000
@@ -67,6 +72,8 @@ for k, pc in enumerate(pcs):
     elif cstart <= pc < cend:
         i = bisect.bisect_right(csym, (pc - cstart, '\xff')) - 1
         cnt['C   ' + csym[i][1] if i >= 0 else 'C ?'] += 1
+    elif vbase is not None and vbase <= pc < vbase + 0x400:
+        cnt['asm video68k ' + ('_tile8' if pc < vbase + vofs_spr else '_spr_put')] += 1
     else:
         cnt['other'] += 1
 print('samples %d in ticks %d..%d (of %d)' % (total, t0, t1, len(pcs)))

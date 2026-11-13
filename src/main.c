@@ -83,6 +83,7 @@ static void read_keys(void)
     logic_extra_pad = p;
 }
 
+void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"));   /* src/video68k.s: its hunk's address for prof.py */
 #define AHEAD_BEAM 40000                /* colour clocks into the frame: later, a tick may not fit before the flip */
 static ULONG bench_ticks;               /* the bench length, or 0 */
 
@@ -167,7 +168,8 @@ int main(int argc, char **argv)
                         (unsigned long)vprof[0], (unsigned long)vprof[1], (unsigned long)vprof[2], (unsigned long)vprof[3], (unsigned long)vprof[4], (unsigned long)vprof[5], (unsigned long)vtiles);
                 fh = Open((CONST_STRPTR)"video.txt", MODE_NEWFILE); if (fh) { Write(fh, b, strlen(b)); Close(fh); } }
             {   extern void *reset_fn; extern ULONG prof_buf[], prof_cnt; ULONG base = (ULONG)reset_fn; fh = Open((CONST_STRPTR)"prof.bin", MODE_NEWFILE);
-                ULONG cbase = (ULONG)game_tick; if (fh) { Write(fh, &base, 4); Write(fh, &cbase, 4); Write(fh, prof_buf, prof_cnt * 4); Close(fh); } }
+                ULONG cbase = (ULONG)game_tick, vbase = (ULONG)tile8, magic = 0x50524f33; /* "PRO3": 3 hunk addresses */
+                if (fh) { Write(fh, &magic, 4); Write(fh, &base, 4); Write(fh, &cbase, 4); Write(fh, &vbase, 4); Write(fh, prof_buf, prof_cnt * 4); Close(fh); } }
             {   fh = Open((CONST_STRPTR)"frames.bin", MODE_NEWFILE); if (fh) { Write(fh, frame_log, frame_n * 36); Close(fh); } }
             {   extern uint32_t logic_time[]; fh = Open((CONST_STRPTR)"ticktime.bin", MODE_NEWFILE);
                 if (fh) { Write(fh, logic_time, logic_ntrace * 4); Close(fh); } }

@@ -32,7 +32,9 @@ static void do_nmi(uint16_t pc)
     nes_ram[0x100 + cpu_s] = p; cpu_s--;
     cpu_i = 1;
     split_seen = 0;
+    nes_in_nmi = 1;
     if (run_nmi() != pc) nes_fatal(pc, 4);
+    nes_in_nmi = 0;
 }
 
 /* Called by the $2007 write path while the NMI is off: the tick ends in the middle of the routine (nes.h). */

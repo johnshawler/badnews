@@ -199,7 +199,7 @@ VSTATIC int sync_rows(int sy)
    the beam has not reached VIDEO_BEAM_STOP colour clocks into the frame, leaving time for the sound and the
    vertical blank. The host harness has no beam: there it is a fixed number of tiles. */
 #ifdef __m68k__
-static int time_left(int done) { return done < 40 || sys_beam() < VIDEO_BEAM_STOP; }
+static int time_left(int done) { return done < 8 || sys_beam() < VIDEO_BEAM_STOP; }
 #else
 static int time_left(int done) { return done < 400; }
 #endif
@@ -671,7 +671,8 @@ void video_frame(void)
     if (nes_ndirty_big) invalidate();
     else if (col_lo <= col_hi)
         VP(0, for (i = 0; i < nes_ndirty; i++) budget -= redraw_cell(nes_dirty[i]));
-    for (i = 0; i < nes_ndirty; i++) nes_dirty_flag[nes_dirty[i]] = 0;
+    if (nes_ndirty > 200) memset(nes_dirty_flag, 0, sizeof nes_dirty_flag);   /* a screen load: all at once */
+    else for (i = 0; i < nes_ndirty; i++) nes_dirty_flag[nes_dirty[i]] = 0;
     nes_ndirty = 0;
     /* while the visible part is incomplete (a new screen), show black and draw quickly, as the NES's own
        screen changes do; otherwise a few tiles a frame keep ahead of the scrolling */

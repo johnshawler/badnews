@@ -194,9 +194,11 @@ int main(int argc, char **argv)
                 push((uint8_t)(PC >> 8)); push((uint8_t)PC); push((uint8_t)((P & ~0x10) | 0x20)); P |= FI;
                 PC = (uint16_t)(nes_rd(0xfffa) | nes_rd(0xfffb) << 8);
                 split_seen = 0;
+                nes_in_nmi = 1;
                 while (!(PC == back && S == s0)) {
                     if (step()) { fprintf(stderr, "verify: wait inside the NMI at tick %u\n", t); return 3; }
                 }
+                nes_in_nmi = 0;
                 split_on = split_seen;
             }
             if (kind == 1) ppu_vbl = 1;

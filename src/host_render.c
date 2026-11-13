@@ -43,9 +43,14 @@ void host_render(const char *path)
     if (ppu_mask & 0x10)
         for (i = 63; i >= 0; i--) {
             int sy = nes_oam[i * 4] + 1, tile = nes_oam[i * 4 + 1], at = nes_oam[i * 4 + 2], sx = nes_oam[i * 4 + 3], r, b;
-            for (r = 0; r < 8; r++) {
-                int yy = sy + r, row = (at & 0x80) ? 7 - r : r; uint16_t pa = ((ppu_ctrl & 0x08) ? 0x1000 : 0) + tile * 16 + row;
-                uint8_t p0 = chr_byte(mmc_chr0, mmc_chr1, pa), p1 = chr_byte(mmc_chr0, mmc_chr1, pa + 8);
+            int h = (ppu_ctrl & 0x20) ? 16 : 8, upper = split_on && sy <= split_line;   /* 8x16 sprites; the tile set */
+            uint8_t s0 = upper ? split_chr0 : mmc_chr0, s1 = upper ? split_chr1 : mmc_chr1;   /* of their part of the split */
+            for (r = 0; r < h; r++) {
+                int yy = sy + r, row = (at & 0x80) ? h - 1 - r : r; uint16_t pa;
+                uint8_t p0, p1;
+                if (h == 16) pa = (uint16_t)(((tile & 1) << 12) + (tile & 0xfe) * 16 + (row & 8) * 2 + (row & 7));
+                else pa = (uint16_t)(((ppu_ctrl & 0x08) ? 0x1000 : 0) + tile * 16 + row);
+                p0 = chr_byte(s0, s1, pa); p1 = chr_byte(s0, s1, pa + 8);
                 if (yy >= 240) continue;
                 for (b = 0; b < 8; b++) {
                     int bit = (at & 0x40) ? b : 7 - b, c = ((p0 >> bit) & 1) | (((p1 >> bit) & 1) << 1);

@@ -145,12 +145,12 @@ static unsigned short bench_input(unsigned int t)      /* copy of game_bench_inp
 {
     /* BENCH INPUT BEGIN (per game: tools/new_port.sh resets it) */
     /* "Spectator mode" (computer against computer): START skips the intro, DOWN x4 picks the mode, then one
-       START per set-up screen (teams, orders, pitchers, starting members). From tick ~1500 the game plays itself:
-       pitches, hits, field play, outs, the change of sides. */
+       START per set-up screen (teams, orders, pitchers, starting members). From tick ~1000 the game plays itself:
+       pitches, hits, field play, outs, the change of sides, a home run. */
     static const unsigned short presses[][3] = {
-        { 60, 63, IN_START }, { 150, 153, IN_DOWN }, { 180, 183, IN_DOWN }, { 210, 213, IN_DOWN }, { 240, 243, IN_DOWN },
-        { 280, 283, IN_START }, { 420, 423, IN_START }, { 570, 573, IN_START }, { 720, 723, IN_START },
-        { 870, 873, IN_START }, { 1020, 1023, IN_START }, { 1170, 1173, IN_START }, { 1320, 1323, IN_START } };
+        { 40, 43, IN_START }, { 100, 103, IN_DOWN }, { 115, 118, IN_DOWN }, { 130, 133, IN_DOWN }, { 145, 148, IN_DOWN },
+        { 170, 173, IN_START }, { 260, 263, IN_START }, { 340, 343, IN_START }, { 420, 423, IN_START },
+        { 500, 503, IN_START }, { 580, 583, IN_START }, { 660, 663, IN_START }, { 740, 743, IN_START } };
     unsigned i;
     for (i = 0; i < sizeof presses / sizeof presses[0]; i++)
         if (t >= presses[i][0] && t <= presses[i][1]) return presses[i][2];

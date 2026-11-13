@@ -129,13 +129,26 @@ uint8_t nes_io_read(uint16_t a)
 /* $2002 read inside a loop that waits for the sprite 0 hit. The hit flag toggles at every such read, so a
    loop waiting for it to clear and then to set ends after at most two reads; the set one marks the raster
    split: what the game changes after it applies to the lower part of the picture. */
+static uint8_t s0_first_row(void)             /* first line of sprite 0 with an opaque pixel: where the hit is */
+{
+    uint8_t tile = nes_oam[1], at = nes_oam[2], h = (ppu_ctrl & 0x20) ? 16 : 8, r;
+    for (r = 0; r < h; r++) {
+        uint8_t row = (at & 0x80) ? (uint8_t)(h - 1 - r) : r, bank;
+        uint16_t a = (h == 16) ? (uint16_t)(((tile & 1) << 12) + (tile & 0xfe) * 16 + (row & 8) * 2 + (row & 7))
+                               : (uint16_t)(((ppu_ctrl & 0x08) ? 0x1000 : 0) + tile * 16 + row);
+        bank = (mmc_ctrl & 0x10) ? (a < 0x1000 ? mmc_chr0 : mmc_chr1) : (uint8_t)((mmc_chr0 & 0x1e) | (a >> 12));
+        if (nes_chr[(uint32_t)(bank & 31) * 0x1000 + (a & 0xfff)] | nes_chr[(uint32_t)(bank & 31) * 0x1000 + (a & 0xfff) + 8]) return r;
+    }
+    return 0;
+}
+
 uint8_t nes_read_s0(void)
 {
     uint8_t r = (uint8_t)((ppu_vbl << 7) | (ppu_s0 << 6));
     if (ppu_s0) {
         split_seen = 1;
         split_ctrl = ppu_ctrl; split_chr0 = mmc_chr0; split_chr1 = mmc_chr1; split_t = ppu_t; split_fx = ppu_fx;
-        split_line = nes_oam[0];
+        split_line = (uint8_t)(nes_oam[0] + 1 + s0_first_row());   /* the last line drawn with the upper values */
     }
     ppu_vbl = 0; ppu_w = 0; ppu_s0 ^= 1;
     return r;

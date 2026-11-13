@@ -59,3 +59,91 @@ HLE[(7, 0xc200)] = '''
     move.l #$ff,d1
     tst.b d1
     ori.b #$10,ccr'''
+
+# $8012 (bank 0) = JMP $87FD: the metasprite builder. A = sprite number; its list (pointer table at $A628) holds
+# groups "count (bit 7 = end), x offset, count x (y offset, tile, attribute)": one column of sprites per group.
+# x = offset (mirrored: ~offset - 7 when $25 bit 6) + $26, y = offset + $28 - 1 ($28 is decremented first),
+# attribute EOR $25; OAM entries from X = $24 on, X left in $24. Returns A = the end byte (N=1 Z=0), Y = its index,
+# C and V from the last y addition (C from ASL A when the list is empty). $00/$01 = list, $02 = 0 and $03 = the
+# last x (or $28/$A6+C when empty). Guarded: the list must be in this bank, every count non-zero, Y not wrap.
+HLE[(0, 0x8012)] = '''
+    moveq #0,d7
+    move.b d0,d7
+    add.w d7,d7
+    lea ($a628-$8000,a3),a0
+    moveq #0,d6
+    move.b 1(a0,d7.w),d6
+    lsl.w #8,d6
+    move.b (a0,d7.w),d6
+    cmp.l #$8000,d6
+    bcs .orig
+    cmp.l #$bf00,d6
+    bcc .orig
+    lea (-$8000,a3,d6.l),a0
+    move.l a0,a1
+.v  moveq #0,d4
+    move.b (a1),d4
+    bmi.s .vok
+    beq .orig
+    lea 2(a1),a1
+    adda.w d4,a1
+    adda.w d4,a1
+    adda.w d4,a1
+    move.l a1,d4
+    sub.l a0,d4
+    cmp.l #250,d4
+    bhi .orig
+    bra.s .v
+.vok
+    btst #7,d0
+    sne d3
+    move.b #$28,$02-$80(a5)
+    move.b #$a6,$03-$80(a5)
+    tst.b d3
+    beq.s .a6
+    move.b #$a7,$03-$80(a5)
+.a6 move.b d6,$00-$80(a5)
+    lsr.w #8,d6
+    move.b d6,$01-$80(a5)
+    subq.b #1,$28-$80(a5)
+    move.b $28-$80(a5),d6
+    moveq #0,d1
+    move.b $24-$80(a5),d1
+    move.l a0,a1
+.grp
+    move.b (a1)+,d0
+    bmi.s .end
+    move.b d0,d4
+    move.b (a1)+,d0
+    btst #6,$25-$80(a5)
+    beq.s .nm
+    not.b d0
+    subq.b #7,d0
+.nm add.b $26-$80(a5),d0
+    move.b d0,d7
+    move.b d0,$03-$80(a5)
+    clr.b $02-$80(a5)
+.ent
+    move.b (a1)+,d0
+    add.b d6,d0
+    scs d3
+    svs d5
+    move.b d0,($180,a5,d1.w)
+    move.b (a1)+,($181,a5,d1.w)
+    move.b (a1)+,d0
+    move.b $25-$80(a5),d2
+    eor.b d2,d0
+    move.b d0,($182,a5,d1.w)
+    move.b d7,($183,a5,d1.w)
+    addq.b #4,d1
+    subq.b #1,d4
+    bne.s .ent
+    bra.s .grp
+.end
+    move.b d1,$24-$80(a5)
+    move.l a1,d2
+    sub.l a0,d2
+    subq.l #1,d2
+    add.b d3,d3
+    tst.b d0'''
+HLE_FALLBACK.add((0, 0x8012))

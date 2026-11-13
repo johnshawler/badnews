@@ -44,6 +44,7 @@ static void shot(const char *name)
     for (n = 0; n < 7; n += 1) {            /* walk each sprite list: segments of (pos, ctl, lines) */
         UBYTE *d = (UBYTE *)spr[n], *o; int odd = n & 1;
         if (!d || (n < 6 && odd)) continue;
+        if (getenv("SPRCH") && atoi(getenv("SPRCH")) != n) continue;   /* debug: one hardware sprite (pair) only */
         o = (n < 6 && spr[n + 1]) ? (UBYTE *)spr[n + 1] : 0;
         for (;;) {
             if (d - (UBYTE *)spr[n] > 4600) { fprintf(stderr, "sprite %d list runs past its block\n", n); break; }
@@ -80,7 +81,8 @@ int main(int argc, char **argv)
         if (getenv("EVERY") && t % atoi(getenv("EVERY")) && !strstr(list, key0(t + 1))) continue;   /* draw only every Nth tick, like a slow Amiga */
         video_frame();
         snprintf(key, sizeof key, ",%u,", t + 1);
-        if (strstr(list, key)) { snprintf(name, sizeof name, "vhost_%05u.ppm", t + 1); shot(name); }
+        if (strstr(list, key)) { snprintf(name, sizeof name, "vhost_%05u.ppm", t + 1); shot(name);
+            if (getenv("VSTATE")) printf("tick %u ctrl %02x mask %02x mmc %02x/%02x/%02x split %d line %d ctrl %02x chr %02x/%02x\n", t + 1, ppu_ctrl, ppu_mask, mmc_ctrl, mmc_chr0, mmc_chr1, split_on, split_line, split_ctrl, split_chr0, split_chr1); }
     }
     printf("sprite clusters dropped: %d\n", video_sprites_dropped);
     return 0;

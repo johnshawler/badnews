@@ -42,4 +42,19 @@ Rules that come with it:
 
 ## Part B: backlog for this port
 
-(Fill in after the load measurement and the first profile. The last port's backlog is in history/llb/PIPELINE.md.)
+Status: stock A1200 33.9 fps, 4 MB fast RAM 43.4 fps, checksum equal (3,000-tick bench: menus, batting, field
+play, the change of sides). Per tick of field play: logic ~45k colour clocks stock / ~17k fast RAM (x1.2 per
+frame), display ~24k per frame. The late frames on fast RAM are mostly spikes: screen loads (one tick of up to
+65,000 6502 instructions), camera cuts (up to 1,700 tile copies in a frame), and runs of frames just over 71k.
+
+| Priority | Item | Expected gain | Effort | How to know it worked |
+| --- | --- | --- | --- | --- |
+| 1 | Bank-switch cost: 41 calls a tick of `$C36C` (via `$C345/$C34F/$C360`); inline the switch at the call sites in the translator, or skip it when the bank does not change | -3-6k per tick stock | medium | `tools/prof.py` field window; checksum equal |
+| 2 | Row-oriented tile drawing in assembly for camera cuts and screen redraws (long writes, 4 tiles at a time) | camera-cut spikes 1/3 | medium | `tools/frames.py` slowest frames; vhost pixel compare |
+| 3 | Screen-load loops (`$C1CC` PPU buffer flush, bank 3 `$8081` meta-tile expansion, bank 0 `$8090`) by hand | fewer late frames at screen changes | medium each | `VERIFY_STATS` ticks; late count in menus |
+| 4 | Sprite grouping in assembly (4k a frame in C) | -3k per frame | medium | `video.txt` grouping figure |
+| 5 | More channels for sprite clusters: a cluster that finds no channel is dropped (title logo, one batter's bat) | correctness | medium | vhost pixel compare, `sprite clusters dropped` |
+| 6 | Home-run screen: upper part pans in 8-pixel steps (scroll split by whole tiles); fine scroll would need a second playfield or a display list | correctness | large | screenshot of the home-run screen |
+| 7 | Intro: the `$2006` split (vertical scroll change) is not shown | correctness (attract only) | medium | intro screenshots |
+| 8 | Measure a 68030 accelerator (the honest "cheapest upgrade" number) | report | small | a third bench line |
+| 9 | Listen on the emulator / real speakers; play-test with a person (1 player mode is traced with random input only) | quality | small | a written note |

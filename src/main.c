@@ -36,9 +36,7 @@ static ULONG video_last;                    /* debug: colour clocks of the last 
 
 static int game_load(void)
 {
-#ifdef LOGIC_TRACE
-    { extern uint32_t (*logic_clock)(void); logic_clock = (uint32_t (*)(void))sys_now; }
-#endif
+    logic_clock = (uint32_t (*)(void))sys_now;      /* the logic times its ticks (running ahead needs it) */
     game_init();
     return video_load() && sound_load();
 }
@@ -84,7 +82,8 @@ static void read_keys(void)
 }
 
 void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"));   /* src/video68k.s: its hunk's address for prof.py */
-#define AHEAD_BEAM 40000                /* colour clocks into the frame: later, a tick may not fit before the flip */
+#define AHEAD_MARGIN 6000               /* colour clocks: a tick like the last one, plus this, must fit before the flip */
+#define SYS_CCK_FRAME 71051
 static ULONG bench_ticks;               /* the bench length, or 0 */
 
 static void game_draw(void)
@@ -106,7 +105,7 @@ static void game_draw(void)
 #endif
     /* Idle time left in this frame: run the next tick now (src/logic.c, game_tick_ahead), with the input the loop
        would pass it. Every fifth frame needs two ticks; this way it does the work of one. Never past the bench. */
-    if (sys_beam() < AHEAD_BEAM && !(bench_ticks && logic_calls >= bench_ticks))
+    if (sys_beam() + logic_last + AHEAD_MARGIN < SYS_CCK_FRAME && !(bench_ticks && logic_calls >= bench_ticks))
         game_tick_ahead(bench_ticks ? game_bench_input(logic_calls) : sys_joy(1));
     video_idle();                       /* optional display work (the crowd animation) in what is left */
 }

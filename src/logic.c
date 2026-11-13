@@ -19,9 +19,11 @@ uint8_t logic_extra_pad;
 uint32_t logic_trace[LOGIC_TRACE]; unsigned logic_ntrace;
 uint8_t logic_dump[0x808];
 uint32_t logic_time[LOGIC_TRACE];               /* colour clocks each tick took (Amiga debug builds) */
-uint32_t (*logic_clock)(void);
 #endif
+uint32_t (*logic_clock)(void);                  /* the Amiga's clock (src/main.c); 0 on the host */
+uint32_t logic_last;                            /* colour clocks the last tick took (for running ahead) */
 uint32_t logic_frames;
+uint16_t logic_burst;
 static uint32_t co_stack[32768 / 4];            /* the NES main thread's C stack */
 
 static void do_nmi(uint16_t pc)
@@ -50,6 +52,7 @@ void nes_slice(void)
 void nes_wait(int kind, uint16_t pc)
 {
     nes_sliced = 0;
+    logic_burst = nes_slice_count;              /* diagnostics: NMI-off $2007 writes of the burst that ended here */
     nes_slice_count = 0;
     split_on = split_seen;                      /* a sprite-0 split in this frame, in the NMI or in the main thread */
     co_yield();                                 /* the frame is over: the Amiga side draws it */
@@ -85,13 +88,13 @@ static void run_tick(unsigned short in)
     if (in & IN_LEFT) p |= 0x40;
     if (in & IN_RIGHT) p |= 0x80;
     nes_pad = p;
-#ifdef LOGIC_TRACE
     {   uint32_t t0 = logic_clock ? logic_clock() : 0;
         co_resume();
-        if (logic_ntrace < LOGIC_TRACE) logic_time[logic_ntrace] = logic_clock ? logic_clock() - t0 : 0; }
-#else
-    co_resume();
+        logic_last = logic_clock ? logic_clock() - t0 : 0;
+#ifdef LOGIC_TRACE
+        if (logic_ntrace < LOGIC_TRACE) logic_time[logic_ntrace] = logic_last;
 #endif
+    }
 #ifdef LOGIC_TRACE
 #ifdef LOGIC_NOSUM                              /* profiling builds: no checksum work in the ticks */
     if (logic_ntrace < LOGIC_TRACE) logic_trace[logic_ntrace++] = 0;

@@ -83,8 +83,8 @@ ULONG video_plane;                      /* bytes from one bitplane to the next (
 void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"));
 void spr_put(UBYTE *e __asm("a0"), UBYTE *o __asm("a1"), const UBYTE *chr __asm("a2"), ULONG ctl __asm("d0"));
 #endif
-#if !defined(__m68k__) || defined(LOGIC_TRACE)
-#ifdef __m68k__                         /* debug builds: the C version checks the assembly one (sprite_check) */
+#if !defined(__m68k__) || defined(VIDEO_CHECK)
+#ifdef __m68k__                         /* -DVIDEO_CHECK debug builds: the C version checks the assembly one */
 #define tile8 tile8_c
 #define spr_put spr_put_c
 #endif
@@ -392,14 +392,18 @@ static Group *gp[64];                    /* the groups, in OAM order: pointers, 
 #ifdef __m68k__
 int build_groups68(Group **g __asm("a0"), Group *pool __asm("a1"), const UBYTE *oam __asm("a2"), int sh __asm("d0"));
 VSTATIC void build_groups_c(void);
-#ifdef LOGIC_TRACE
+#ifndef VIDEO_CHECK
+ULONG vgroup_checks, vgroup_diffs, vspr_checks, vspr_diffs;     /* (counted only with -DVIDEO_CHECK) */
+UBYTE vspr_dump[800];
+#endif
+#ifdef VIDEO_CHECK
 ULONG vgroup_checks, vgroup_diffs;      /* debug: the assembly clustering compared with the C one every frame */
 static Group grp_c[64], *gp_c[64];
 #endif
 VSTATIC void build_groups(void)
 {
     ngrp = build_groups68(gp, grp, nes_oam, (ppu_ctrl & 0x20) ? 16 : 8);    /* video68k.s */
-#ifdef LOGIC_TRACE
+#ifdef VIDEO_CHECK
     {   Group *sg = grp, **sp = gp; Group *keep[64]; int k, n68 = ngrp, bad = 0;
         static Group copy[64];
         for (k = 0; k < n68; k++) { copy[k] = *gp[k]; keep[k] = gp[k]; }
@@ -528,6 +532,7 @@ typedef struct { ULONG sig; UWORD n; UBYTE *e, *o; } Cached;
 static Cached cache[2][4 * NSEG];
 static int ncache[2];
 
+static ULONG *tile_hash;                /* by 4 KB CHR bank and tile: a hash of its 16 bytes (video_load) */
 VSTATIC ULONG group_sig(Group *g, int with_o)
 {
     ULONG h = (ULONG)g->n * 0x9e3779b1UL ^ (ULONG)(g->y1 - g->y0) ^ ((ULONG)with_o << 31) ^ ((ULONG)(ppu_ctrl & 0x28) << 20);
@@ -539,8 +544,12 @@ VSTATIC ULONG group_sig(Group *g, int with_o)
                 | ((ULONG)(UBYTE)(nes_oam[i * 4 + 3] - g->x0) << 8) | (UBYTE)(nes_oam[i * 4] + 1 - g->y0);
         UBYTE c0 = upper ? split_chr0 : mmc_chr0, c1 = upper ? split_chr1 : mmc_chr1, tile = nes_oam[i * 4 + 1];
         int hi = (ppu_ctrl & 0x20) ? (tile & 1) : ((upper ? split_ctrl : ppu_ctrl) & 0x08) != 0;
-        ULONG bank = (mmc_ctrl & 0x10) ? (hi ? c1 : c0) : (ULONG)((c0 & 0x1e) | hi);    /* the 4 KB bank it reads: the */
-        h = (h ^ v ^ (ULONG)upper ^ (bank << 17)) * 16777619UL + (ULONG)k;          /* game animates by switching banks */
+        ULONG bank = (mmc_ctrl & 0x10) ? (hi ? c1 : c0) : (ULONG)((c0 & 0x1e) | hi);    /* the 4 KB bank it reads */
+        /* the pixels, not the bank number: the game switches banks to animate the crowd, and most sprite tiles
+           look the same in both banks (8x16: both tiles of the pair) */
+        ULONG px = (ppu_ctrl & 0x20) ? tile_hash[(bank & 31) * 256 + (tile & 0xfe)] * 3 + tile_hash[(bank & 31) * 256 + (tile | 1)]
+                                     : tile_hash[(bank & 31) * 256 + tile];
+        h = (h ^ v ^ (ULONG)upper ^ px) * 16777619UL + (ULONG)k;
     }
     return h;
 }
@@ -642,6 +651,13 @@ int video_load(void)
     for (i = 0; i < 2; i++)
         for (j = 0; j < 7; j++)
             if (!(spr_mem[i][j] = sys_alloc(SPR_BYTES, MEMF_CHIP | MEMF_CLEAR))) return 0;
+    if (!(tile_hash = sys_alloc(32 * 256 * sizeof *tile_hash, MEMF_ANY))) return 0;
+    for (i = 0; i < 32 * 256; i++) {
+        const UBYTE *t = nes_chr_data + (ULONG)i * 16;
+        ULONG h = 2166136261UL;
+        for (j = 0; j < 16; j++) h = (h ^ t[j]) * 16777619UL;
+        tile_hash[i] = h;
+    }
     video_plane = 0;
     invalidate();
     return 1;

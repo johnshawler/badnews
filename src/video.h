@@ -7,4 +7,5 @@ extern int video_sprites_dropped;       /* NES sprite clusters that found no har
 int  video_load(void);                  /* before sys_take(): sprite lists in chip RAM */
 void video_start(void);                 /* after disp_on() */
 void video_frame(void);                 /* once per drawn frame */
+void video_idle(void);                  /* the end of a frame: optional work in the time left */
 #endif

@@ -80,7 +80,7 @@ int main(int argc, char **argv)
     for (t = 0; t < n; t++) {
         game_tick(game_bench_input(t));
         if (getenv("EVERY") && t % atoi(getenv("EVERY")) && !strstr(list, key0(t + 1))) continue;   /* draw only every Nth tick, like a slow Amiga */
-        video_frame();
+        video_frame(); video_idle();
         snprintf(key, sizeof key, ",%u,", t + 1);
         if (strstr(list, key)) { snprintf(name, sizeof name, "vhost_%05u.ppm", t + 1); shot(name);
             if (getenv("VSTATE")) printf("tick %u ctrl %02x mask %02x mmc %02x/%02x/%02x split %d line %d ctrl %02x chr %02x/%02x\n", t + 1, ppu_ctrl, ppu_mask, mmc_ctrl, mmc_chr0, mmc_chr1, split_on, split_line, split_ctrl, split_chr0, split_chr1); }

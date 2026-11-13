@@ -35,9 +35,20 @@ static void do_nmi(uint16_t pc)
     if (run_nmi() != pc) nes_fatal(pc, 4);
 }
 
+/* Called by the $2007 write path while the NMI is off: the tick ends in the middle of the routine (nes.h). */
+void nes_slice(void)
+{
+    split_on = split_seen;
+    nes_sliced = 1;                             /* before the yield: the checksum after this tick sees it */
+    co_yield();
+    logic_frames++;
+}
+
 /* Called by the translated code in a loop that waits for the next frame. */
 void nes_wait(int kind, uint16_t pc)
 {
+    nes_sliced = 0;
+    nes_slice_count = 0;
     split_on = split_seen;                      /* a sprite-0 split in this frame, in the NMI or in the main thread */
     co_yield();                                 /* the frame is over: the Amiga side draws it */
     logic_frames++;
@@ -147,6 +158,7 @@ uint32_t game_checksum(void)
     h = fnv(h, nes_vram, sizeof nes_vram);
     h = fnv(h, nes_pal, sizeof nes_pal);
     h = fnv(h, nes_oam, sizeof nes_oam);
-    r[0] = cpu_a; r[1] = cpu_x; r[2] = cpu_y; r[3] = cpu_s; r[4] = nes_bank; r[5] = ppu_ctrl; r[6] = ppu_mask; r[7] = (uint8_t)nes_fatal_why;
+    r[0] = cpu_a; r[1] = cpu_x; r[2] = cpu_y; r[3] = cpu_s;
+    if (nes_sliced) r[0] = r[1] = r[2] = r[3] = 0;      /* mid-routine: the registers are not in the globals */ r[4] = nes_bank; r[5] = ppu_ctrl; r[6] = ppu_mask; r[7] = (uint8_t)nes_fatal_why;
     return fnv(h, r, 8);
 }

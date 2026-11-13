@@ -90,7 +90,7 @@ static void ppu_write(uint16_t a, uint8_t d)
     a &= 0x1f; if ((a & 0x13) == 0x10) a &= 0x0f; pal[a] = d & 0x3f;
 }
 
-static unsigned long iocount[2][0x10000]; static int io_on;   /* -p: I/O reads and writes per address */
+static unsigned long iocount[2][0x10000]; static int io_on; static uint16_t cur_pc; static unsigned long mapw_pc[0x10000];   /* -p: I/O reads and writes per address */
 static uint8_t rd(uint16_t a)
 {
     if (io_on && a >= 0x2000 && a < 0x8000) iocount[0][a]++;
@@ -113,7 +113,7 @@ static uint8_t rd(uint16_t a)
 }
 static void wr(uint16_t a, uint8_t d)
 {
-    if (io_on && a >= 0x2000) iocount[1][a]++;   /* IOCOUNT: -p also counts I/O writes and reads per address */
+    if (io_on && a >= 0x2000) { iocount[1][a]++; if (a >= 0x8000) mapw_pc[cur_pc]++; }   /* IOCOUNT: -p also counts I/O writes and reads per address */
     if (a < 0x2000) { ram[a & 0x7ff] = d; return; }
     if (a < 0x4000) {
         frame_ppuw++;
@@ -191,6 +191,7 @@ static void step(void)
     if (cov) cov_mark(PC, 1);
     if (prof && prof_on) prof[(PC >= 0x8000 ? prg_bank_for(PC) : 15) * 0x10000 + PC]++;
     op = rd(PC++);
+    cur_pc = pc0;
     if (trace) printf("%02x:%04x %02x A=%02x X=%02x Y=%02x P=%02x S=%02x\n", pc0 >= 0x8000 ? prg_bank_for(pc0) : 0xff, pc0, op, A, X, Y, P, S);
     cycles += cyc[op]; instr_total++;
     { static int nw = -1; static unsigned short wl[64]; int k, waiting = 0;
@@ -407,7 +408,7 @@ int main(int argc, char **argv)
         if (strstr(dumps, key)) dump(dir, fr);
     }
     if (covf) { for (i = 0; i < prg_banks * 0x4000; i++) if (cov[i] & 1) fprintf(covf, "E %d %04x\n", i / 0x4000, (i / 0x4000 == prg_banks - 1 ? 0xc000 : 0x8000) + (i & 0x3fff)); fclose(covf); }
-    if (proff) { for (i = 0; i < 16 * 0x10000; i++) if (prof[i]) fprintf(proff, "%u %x %04x\n", prof[i], i >> 16, i & 0xffff); for (i = 0; i < 0x10000; i++) { if (iocount[0][i]) fprintf(proff, "R %lu %04x\n", iocount[0][i], i); if (iocount[1][i]) fprintf(proff, "W %lu %04x\n", iocount[1][i], i); }
+    if (proff) { for (i = 0; i < 16 * 0x10000; i++) if (prof[i]) fprintf(proff, "%u %x %04x\n", prof[i], i >> 16, i & 0xffff); for (i = 0; i < 0x10000; i++) { if (iocount[0][i]) fprintf(proff, "R %lu %04x\n", iocount[0][i], i); if (iocount[1][i]) fprintf(proff, "W %lu %04x\n", iocount[1][i], i); if (mapw_pc[i]) fprintf(proff, "M %lu %04x\n", mapw_pc[i], i); }
         fclose(proff); }
     fprintf(stderr, "instructions %lld\n", instr_total);
     return 0;

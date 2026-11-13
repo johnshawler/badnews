@@ -7,6 +7,8 @@ uint8_t nes_ram[0x800];
 const uint8_t *nes_prg, *nes_chr, *nes_prg_lo, *nes_prg_hi;
 uint8_t nes_bank;
 uint16_t nes_fatal_pc; int nes_fatal_why;
+uint16_t nes_slice_count;
+uint8_t nes_sliced;
 
 uint8_t nes_vram[0x800], nes_pal[32], nes_oam[256];
 uint8_t ppu_ctrl, ppu_mask, ppu_fx, ppu_vbl;
@@ -86,6 +88,7 @@ static void vram_write(uint8_t v)
         if (nes_vram[i] != v) { nes_vram[i] = v; mark(i); }
     }                                           /* CHR is ROM: writes below $2000 are ignored */
     ppu_v += (ppu_ctrl & 4) ? 32 : 1;
+    if (!(ppu_ctrl & 0x80) && ++nes_slice_count >= NES_SLICE) { nes_slice_count = 0; nes_slice(); }
 }
 
 static uint8_t vram_read(void)

@@ -72,6 +72,13 @@ extern uint8_t nes_pad;
 uint16_t nes_dispatch(uint16_t pc);             /* generated: run the code at pc (in the mapped bank), return the next pc */
 uint16_t nes_reset_entry(void);
 void     nes_wait(int kind, uint16_t pc);       /* logic.c: the game waits for the next frame here */
+/* Slices: while the NMI is off (a screen being built) the NES runs for several frames without a frame boundary;
+   every NES_SLICE writes to $2007 then end the tick there (nes_slice(), no NMI follows), as frames pass on the NES.
+   Deterministic, so the host test, verify.c and the Amiga slice at the same writes. */
+#define NES_SLICE 128
+extern uint16_t nes_slice_count;
+extern uint8_t  nes_sliced;                     /* the last tick ended in a slice (its registers were not stored) */
+void     nes_slice(void);                       /* logic.c: end the tick here */
 #define WAIT_RAM 0
 #define WAIT_VBL 1
 

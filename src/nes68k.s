@@ -9,7 +9,7 @@
         xdef    _dispatch,_unwind,_io_rd,_io_wr,_rd_ea,_wr_ea_d0,_php,_plp,_set_prg,_wait   ; for the profiler only
         xref    _cpu_a,_cpu_s,_cpu_x,_cpu_y,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
 ;       _cpu_x,_cpu_y,_cpu_s,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
-        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig
+        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig,_nes_slice_count,_nes_slice
         xref    _nes_io_read,_nes_read_s0,_nes_write_slow,_nes_wait,_nes_fatal,_nes_mmc_prg,_nes_mmc_ctrl
 
 ; ---- moving the 6502 state between the globals and the registers
@@ -230,24 +230,23 @@ _io_wr_d2:
         moveq   #0,d4
         move.b  d2,d4
 _set_prg:                               ; d4 = new MMC1 PRG register: as five serial writes would leave it
-        move.w  ccr,-(sp)
-        move.b  _mmc_ctrl,d3
+        move.b  _mmc_ctrl,d3            ; (the flags are not kept: the hand-written callers set them after)
         and.b   #$0c,d3
         cmp.b   #$0c,d3                 ; mode 3 (the game's): 16 KB at $8000 switched, the last bank fixed
-        bne.s   .c
+        bne.s   .c0
         move.b  d4,_mmc_prg
-        move.b  d4,d3
-        and.l   #7,d3
+        moveq   #7,d3
+        and.b   d4,d3
         move.b  d3,_nes_bank
-        moveq   #14,d4
-        lsl.l   d4,d3                   ; bank * $4000
-        lea     _nes_prg_data,a3
-        adda.l  d3,a3
+        lea     .banks(pc),a3
+        move.l  (a3,d3.w*4),a3          ; bank * $4000 into the PRG ROM
         move.l  a3,_nes_prg_lo
-        move.l  #_nes_prg_data+$1c000,_nes_prg_hi
         move.b  #$10,_mmc_shift
-        move.w  (sp)+,ccr
         rts
+.banks
+        dc.l    _nes_prg_data,_nes_prg_data+$4000,_nes_prg_data+$8000,_nes_prg_data+$c000
+        dc.l    _nes_prg_data+$10000,_nes_prg_data+$14000,_nes_prg_data+$18000,_nes_prg_data+$1c000
+.c0     move.w  ccr,-(sp)
 .c
         movem.l d0-d1/a0-a1,-(sp)
         move.l  d4,-(sp)
@@ -306,6 +305,13 @@ _io_wr: cmpa.w  #$2007,a0               ; PPU data port: nametable writes done h
         beq.s   .i1
         moveq   #32,d3
 .i1     add.w   d3,_ppu_v
+        btst    #7,_ppu_ctrl            ; NMI off (a screen being built): count towards a slice (nes.h)
+        bne     .done
+        addq.w  #1,_nes_slice_count
+        cmp.w   #128,_nes_slice_count   ; NES_SLICE (src/nes.h)
+        bcs     .done
+        clr.w   _nes_slice_count
+        jsr     _nes_slice              ; the tick ends here; d0-d1/a0-a1 are restored at .done
         bra     .done
 .nt9    cmpa.l  #$8000,a0               ; MMC1: four of the five serial writes only shift
         bcs     .pad

@@ -240,6 +240,8 @@ VSTATIC void fix_edges(void)
     int r;
     for (uc = col_lo; uc <= col_hi; uc++) {
         UBYTE want = col_visible(uc) ? 1 : 2;
+        if (want == 2 && (col_visible(uc - 1) || col_visible(uc + 1))) continue;   /* next to the picture: keep it,
+                                                     so a camera that wobbles by a pixel does not redraw it each frame */
         if (colstate[uc & 63] != want) {
             colstate[uc & 63] = want;
             for (r = 0; r < 30; r++) draw_tile(uc, r);
@@ -319,7 +321,7 @@ VSTATIC int retile_col(LONG uc)
 }
 
 #ifdef __m68k__
-static int spare_time(void) { return sys_beam() < 30000; }   /* room left for this and for running the next tick ahead */
+static int spare_time(void) { return sys_beam() < VIDEO_BEAM_STOP - 4000; }   /* the frame still has room */
 #else
 static int spare_time(void) { static int n; return (++n & 7) != 0; }   /* host: some columns a frame */
 #endif
@@ -361,37 +363,38 @@ int video_sprites_dropped;
 unsigned long vstat[3];                 /* host harness: groups kept in place, copied, drawn */
 #endif
 
+static Group *gp[64];                    /* the groups, in OAM order: pointers, so a merge moves no structure */
 VSTATIC void build_groups(void)
 {
-    int i, j, k;
+    int i, j, k, n = 0, nfree = 0;
     WORD sh = (ppu_ctrl & 0x20) ? 16 : 8;      /* 8x16 sprites (PPUCTRL bit 5) */
-    ngrp = 0;
-    for (i = 0; i < 64; i++) {
-        UBYTE y = nes_oam[i * 4], x = nes_oam[i * 4 + 3];
-        WORD sy = (WORD)y + 1;
+    const UBYTE *o = nes_oam;
+    for (i = 0; i < 64; i++, o += 4) {
+        WORD y = o[0], x = o[3], sy = (WORD)(y + 1);
         if (y >= 0xef) continue;
-        for (j = ngrp > 4 ? ngrp - 4 : 0; j < ngrp; j++) {   /* a metasprite's sprites come together in OAM */
-            Group *g = &grp[j];
+        for (j = n > 4 ? n - 4 : 0; j < n; j++) {   /* a metasprite's sprites come together in OAM */
+            Group *g = gp[j];
             WORD nx0 = x < g->x0 ? x : g->x0, nx1 = x + 8 > g->x1 ? x + 8 : g->x1;
             if (nx1 - nx0 > SPR_W || g->n >= MAXIN) continue;
             if (sy > g->y1 + 1 || sy + sh < g->y0 - 1 || x > g->x1 + 1 || x + 8 < g->x0 - 1) continue;
             g->x0 = nx0; g->x1 = nx1;
             if (sy < g->y0) g->y0 = sy;
-            if (sy + sh > g->y1) g->y1 = sy + sh;
+            if (sy + sh > g->y1) g->y1 = (WORD)(sy + sh);
             g->idx[g->n++] = (UBYTE)i;
-            if ((nes_oam[i * 4 + 2] & 3) != 3) g->pal3only = 0;
+            if ((o[2] & 3) != 3) g->pal3only = 0;
             break;
         }
-        if (j >= ngrp) {
-            Group *g = &grp[ngrp++];
-            g->x0 = x; g->x1 = x + 8; g->y0 = sy; g->y1 = sy + sh; g->n = 1; g->idx[0] = (UBYTE)i;
-            g->pal3only = (nes_oam[i * 4 + 2] & 3) == 3;
+        if (j >= n) {
+            Group *g = gp[n++] = &grp[nfree++];
+            g->x0 = x; g->x1 = (WORD)(x + 8); g->y0 = sy; g->y1 = (WORD)(sy + sh); g->n = 1; g->idx[0] = (UBYTE)i;
+            g->pal3only = (o[2] & 3) == 3;
         }
     }
     /* merge groups that touch, while they fit */
-    for (i = 0; i < ngrp; i++)
-        for (j = i + 1; j < ngrp && j <= i + 6; j++) {   /* neighbours in OAM order only */
-            Group *a = &grp[i], *b = &grp[j];
+    for (i = 0; i < n; i++) {
+        Group *a = gp[i];
+        for (j = i + 1; j < n && j <= i + 6; j++) {   /* neighbours in OAM order only */
+            Group *b = gp[j];
             WORD nx0 = a->x0 < b->x0 ? a->x0 : b->x0, nx1 = a->x1 > b->x1 ? a->x1 : b->x1;
             if (nx1 - nx0 > SPR_W || a->n + b->n > MAXIN) continue;
             if (b->y0 > a->y1 + 1 || b->y1 < a->y0 - 1 || b->x0 > a->x1 + 1 || b->x1 < a->x0 - 1) continue;
@@ -400,8 +403,10 @@ VSTATIC void build_groups(void)
             if (b->y1 > a->y1) a->y1 = b->y1;
             for (k = 0; k < b->n; k++) a->idx[a->n++] = b->idx[k];
             a->pal3only &= b->pal3only;
-            grp[j] = grp[--ngrp]; j--;              /* look at the group moved into slot j */
+            gp[j] = gp[--n]; j--;                   /* look at the group moved into slot j */
         }
+    }
+    ngrp = n;
 }
 
 VSTATIC int try_place(Chan *c, Group *g)
@@ -417,7 +422,7 @@ VSTATIC void assign(void)
     int i, j, k;
     Group *order[64];
     for (i = 0; i < 4; i++) chan[i].n = 0;
-    for (i = 0; i < ngrp; i++) order[i] = &grp[i];
+    for (i = 0; i < ngrp; i++) order[i] = gp[i];
     for (i = 1; i < ngrp; i++) {                      /* by top line */
         Group *t = order[i];
         for (j = i; j > 0 && order[j - 1]->y0 > t->y0; j--) order[j] = order[j - 1];
@@ -526,10 +531,14 @@ VSTATIC void build_sprites(void)
             {   ULONG sig = group_sig(g, o != 0);
                 Cached *cp = cache[spr_set ^ 1], *hit = 0;
                 int j;
-                int same = 0;
-                for (j = 0; j < nheld; j++)     /* the same lines are already here: nothing to write */
+                int same = 0, at = ncache[spr_set];     /* most groups sit where they sat: look there first */
+                if (at < nheld && held[at].e == e + 16 && held[at].sig == sig && held[at].n == n && !held[at].o == !o) same = 1;
+                else for (j = 0; j < nheld; j++)        /* the same lines are already here: nothing to write */
                     if (held[j].e == e + 16 && held[j].sig == sig && held[j].n == n && !held[j].o == !o) { same = 1; break; }
-                if (!same) for (j = 0; j < ncache[spr_set ^ 1]; j++) if (cp[j].sig == sig && cp[j].n == n && !cp[j].o == !o) { hit = &cp[j]; break; }
+                if (!same) {
+                    if (at < ncache[spr_set ^ 1] && cp[at].sig == sig && cp[at].n == n && !cp[at].o == !o) hit = &cp[at];
+                    else for (j = 0; j < ncache[spr_set ^ 1]; j++) if (cp[j].sig == sig && cp[j].n == n && !cp[j].o == !o) { hit = &cp[j]; break; }
+                }
 #ifndef __m68k__
                 {   extern unsigned long vstat[3]; vstat[same ? 0 : hit ? 1 : 2]++; }
 #endif
@@ -669,7 +678,7 @@ void video_frame(void)
     want_cols(&vlo, &vhi);
     budget = (on && col_lo <= vlo && col_hi >= vhi) ? 24 : -1;
     VP(1, stream_cols(budget));
-    VP(4, retile_step(on ? 64 : 400));
+    if (!on) VP(4, retile_step(400));          /* black anyway: catch up now; else video_idle() does it */
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
     {   static LONG e_cam = -1, e_lo, e_hi; static UBYTE e_mask;     /* columns cross the edge only when these change */
         if (col_lo <= col_hi && (cam_ux != e_cam || col_lo != e_lo || col_hi != e_hi || ((ppu_mask ^ e_mask) & 2))) {
@@ -696,3 +705,9 @@ void video_frame(void)
     else { for (i = 0; i < 7; i++) disp_sprite_off((UWORD)i); spr_valid = 0; }
 }
 
+/* Called at the very end of a drawn frame, after the next tick may have been run ahead: the crowd animation
+   (CHR-bank retile) uses whatever time is left before the vertical blank. */
+void video_idle(void)
+{
+    retile_step(64);
+}

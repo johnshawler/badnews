@@ -13,6 +13,8 @@
 
 uint8_t nes_prg_data[0x20000], nes_chr_data[0x20000];
 void nes_wait(int kind, uint16_t pc) { (void)kind; (void)pc; }
+static int slice_hit;                                   /* nes.c asked for a slice (nes.h): end the tick */
+void nes_slice(void) { slice_hit = 1; }
 uint16_t nes_dispatch(uint16_t pc) { return pc; }
 uint16_t nes_reset_entry(void) { return 0; }
 
@@ -138,6 +140,7 @@ static int step(void)
     case 0xea: break;
     default: fprintf(stderr, "verify: unknown opcode %02x at %04x bank %d\n", op, pc0, bank_of(pc0)); exit(3);
     }
+    if (slice_hit) { slice_hit = 0; return 3; }         /* a slice: the frame ends after this instruction */
     return 0;
 }
 
@@ -185,7 +188,7 @@ int main(int argc, char **argv)
     PC = (uint16_t)(nes_rd(0xfffc) | nes_rd(0xfffd) << 8);
     for (t = 0; t < n; t++) {
         nes_pad = pad_of(bench_input(t));
-        if (kind >= 0) {                                /* start of a frame after a wait: NMI, then the vblank flag */
+        if (kind >= 0 && kind != 2) {                   /* start of a frame after a wait: NMI, then the vblank flag */
             if (ppu_ctrl & 0x80) {
                 uint16_t back = PC; uint8_t s0 = S;
                 push((uint8_t)(PC >> 8)); push((uint8_t)PC); push((uint8_t)((P & ~0x10) | 0x20)); P |= FI;
@@ -200,7 +203,7 @@ int main(int argc, char **argv)
         }
         {   long cnt = 0; static long *hist; uint16_t pcs = 0;
             if (getenv("VERIFY_STATS") && !hist) hist = calloc(0x10000, sizeof *hist);
-            for (;;) { int r; if (hist) hist[PC]++; r = step(); cnt++; if (r) { kind = r - 1; pcs = pc0; break; } }
+            for (;;) { int r; if (hist) hist[PC]++; r = step(); cnt++; if (r) { kind = r - 1; pcs = pc0; if (kind != 2) nes_slice_count = 0; break; } }
             /* VERIFY_STATS=n: ticks of more than n 6502 instructions, with the most executed addresses */
             if (hist && cnt > atol(getenv("VERIFY_STATS"))) {
                 int i, j, best[5] = {0};

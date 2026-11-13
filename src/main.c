@@ -108,6 +108,7 @@ static void game_draw(void)
        would pass it. Every fifth frame needs two ticks; this way it does the work of one. Never past the bench. */
     if (sys_beam() < AHEAD_BEAM && !(bench_ticks && logic_calls >= bench_ticks))
         game_tick_ahead(bench_ticks ? game_bench_input(logic_calls) : sys_joy(1));
+    video_idle();                       /* optional display work (the crowd animation) in what is left */
 }
 
 /* ---- the loop: keep as it is ------------------------------------------------------------------ */

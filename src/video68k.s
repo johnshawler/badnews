@@ -53,7 +53,7 @@ _tile8: movem.l d2/a2-a4,-(sp)          ; unrolled: fixed offsets, no loop
 ; e, o: the sprite's first line in the even and odd sprite's data (16 bytes a line: 8 plane A, 8 plane B).
 ; ctl: bits 0-5 x in the 64-pixel window, 8 h-flip, 9 v-flip, 10-11 NES sprite palette, 12 o is valid.
 _spr_put:
-        movem.l d2-d7/a3,-(sp)
+        movem.l d2-d7/a2-a3,-(sp)       ; a2 too: gcc keeps values in it (callee-saved)
         move.l  d0,d7
         moveq   #0,d1
         move.b  d7,d1
@@ -62,6 +62,7 @@ _spr_put:
         adda.w  d2,a0
         adda.w  d2,a1
         and.w   #7,d1
+        beq     .al                     ; byte-aligned: no shifting (sprites of one metasprite, 8 pixels apart)
         moveq   #8,d6
         sub.w   d1,d6                   ; shift: 8 - x mod 8
         lea     _video_flip,a3
@@ -105,7 +106,78 @@ _spr_put:
         lea     16(a1),a1
         adda.w  d4,a2
         dbf     d5,.row
-        movem.l (sp)+,d2-d7/a3
+        movem.l (sp)+,d2-d7/a2-a3
+        rts
+
+; the byte-aligned case: d6/d1 = what the odd sprite's two planes get where the NES sprite is opaque
+.al     lea     _video_flip,a3
+        moveq   #7,d5
+        moveq   #1,d4
+        btst    #9,d7
+        beq.s   .av
+        addq.l  #7,a2
+        moveq   #-1,d4
+.av     btst    #12,d7
+        beq.s   .a1                     ; no odd sprite (sprite 6): planes A and B only
+        moveq   #0,d6
+        btst    #10,d7
+        beq.s   .ap
+        moveq   #-1,d6
+.ap     moveq   #0,d1
+        btst    #11,d7
+        beq.s   .ar
+        moveq   #-1,d1
+.ar     moveq   #0,d2
+        move.b  (a2),d2
+        moveq   #0,d3
+        move.b  8(a2),d3
+        btst    #8,d7
+        beq.s   .ah
+        move.b  (a3,d2.w),d2
+        move.b  (a3,d3.w),d3
+.ah     move.b  d2,d0
+        or.b    d3,d0
+        beq.s   .an
+        move.b  d0,-(sp)
+        not.b   d0                      ; keep mask
+        and.b   d0,(a0)
+        or.b    d2,(a0)
+        and.b   d0,8(a0)
+        or.b    d3,8(a0)
+        and.b   d0,(a1)
+        and.b   d0,8(a1)
+        move.b  (sp)+,d0                ; opaque pixels
+        move.b  d0,d2
+        and.b   d6,d2
+        or.b    d2,(a1)
+        and.b   d1,d0
+        or.b    d0,8(a1)
+.an     lea     16(a0),a0
+        lea     16(a1),a1
+        adda.w  d4,a2
+        dbf     d5,.ar
+        movem.l (sp)+,d2-d7/a2-a3
+        rts
+.a1     moveq   #0,d2
+        move.b  (a2),d2
+        moveq   #0,d3
+        move.b  8(a2),d3
+        btst    #8,d7
+        beq.s   .bh
+        move.b  (a3,d2.w),d2
+        move.b  (a3,d3.w),d3
+.bh     move.b  d2,d0
+        or.b    d3,d0
+        beq.s   .bn
+        not.b   d0
+        and.b   d0,(a0)
+        or.b    d2,(a0)
+        and.b   d0,8(a0)
+        or.b    d3,8(a0)
+.bn     lea     16(a0),a0
+        adda.w  d4,a2
+        dbf     d5,.a1
+        movem.l (sp)+,d2-d7/a2-a3
         rts
 
 

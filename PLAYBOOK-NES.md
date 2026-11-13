@@ -79,6 +79,11 @@ return addresses left on the stack page, and prove them with the per-tick checks
 zero-extended in d0/d1/d2 (the translation indexes memory with `d1.w`): never `moveq #-1,d1` for X = $FF, use
 `move.l #$ff,d1` then `tst.b d1` for the flags (a crash in Bad News Baseball).
 
+Assembly called from C must save every register gcc treats as callee-saved (d2-d7, a2-a6) *even when it is an
+argument* (`__asm("a2")`): gcc 16 keeps values in a2 across the call. `_spr_put` advanced a2 unsaved for two ports;
+it showed only when a debug check ran the C twin right after it. Check each new assembly routine against its C
+version inside debug builds (both run, results compared, differences counted): it found this in one run.
+
 Count the I/O per tick in the frame model, not on the reference NES: `cc -DCOUNT_IO` with a small driver gives
 reads and writes per address (Bad News Baseball: 197 MMC1 writes a tick in field play; the reference NES showed 50
 in a different scene). Bank switches dominate when a game calls code in other banks often.

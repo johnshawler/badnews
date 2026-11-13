@@ -82,7 +82,12 @@ ULONG video_plane;                      /* bytes from one bitplane to the next (
 #ifdef __m68k__
 void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"));
 void spr_put(UBYTE *e __asm("a0"), UBYTE *o __asm("a1"), const UBYTE *chr __asm("a2"), ULONG ctl __asm("d0"));
-#else                                   /* the same in C, for the host harness tools/vhost.c */
+#endif
+#if !defined(__m68k__) || defined(LOGIC_TRACE)
+#ifdef __m68k__                         /* debug builds: the C version checks the assembly one (sprite_check) */
+#define tile8 tile8_c
+#define spr_put spr_put_c
+#endif
 static int host_tiles;                  /* tile8 calls in this frame (VDEBUG) */
 static void tile8(UBYTE *d, const UBYTE *chr, ULONG attr)
 {
@@ -105,6 +110,30 @@ static void spr_put(UBYTE *e, UBYTE *o, const UBYTE *chr, ULONG ctl)
         if (ctl & 0x1000) { PUTW(o, (GETW(o) & k) | ((ctl & 0x400) ? m : 0)); PUTW(o + 8, (GETW(o + 8) & k) | ((ctl & 0x800) ? m : 0)); }
     }
 }
+#ifdef __m68k__
+#undef tile8
+#undef spr_put
+ULONG vspr_checks, vspr_diffs;
+UBYTE vspr_dump[800];
+static void spr_put_checked(UBYTE *e, UBYTE *o, const UBYTE *chr, ULONG ctl)
+{
+    static UBYTE se[8 * 16], so[8 * 16], re[8 * 16], ro[8 * 16];
+    int odd = (ctl & 0x1000) != 0;
+    memcpy(se, e, sizeof se); if (odd) memcpy(so, o, sizeof so);
+    spr_put(e, o, chr, ctl);
+    memcpy(re, e, sizeof re); if (odd) memcpy(ro, o, sizeof ro);
+    memcpy(e, se, sizeof se); if (odd) memcpy(o, so, sizeof so);
+    spr_put_c(e, o, chr, ctl);
+    vspr_checks++;
+    if (memcmp(re, e, sizeof re) || (odd && memcmp(ro, o, sizeof ro))) {
+        if (!vspr_diffs) { int k; UBYTE *d = vspr_dump; for (k = 0; k < 4; k++) d[k] = (UBYTE)(ctl >> (24 - 8 * k));
+            memcpy(d + 4, chr, 16); memcpy(d + 20, se, 128); memcpy(d + 148, re, 128); memcpy(d + 276, e, 128);
+            memcpy(d + 404, so, 128); memcpy(d + 532, ro, 128); memcpy(d + 660, o, 128); d[788] = (UBYTE)odd; }
+        vspr_diffs++;
+    }
+}
+#define spr_put spr_put_checked
+#endif
 #endif
 
 /* tile set for tile row r: upper part above the split line, lower part below */

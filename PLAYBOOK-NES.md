@@ -55,6 +55,10 @@ resets the per-game files and keeps everything reusable. The Claude skill in `sk
   (`nes_wait`). The split line is sprite 0's first opaque row (`s0_first_row` in `nes.c`).
 - **Stack tricks** (jump tables after JSR, `PLA PLA RTS`, pushed-address RTS): the 6502 stack stays in RAM,
   RTS compares with the caller's expectation and unwinds. Jump-table dispatchers go in `NORETURN`.
+- **Screen loads with the NMI off** run for several NES frames without a frame boundary: in the frame model one
+  tick of hundreds of thousands of colour clocks. End the tick every N writes to $2007 while the NMI is off and
+  outside the NMI handler (`NES_SLICE`, `nes_slice()`); deterministic, so host, verify.c and Amiga agree. N must be
+  at least what the NES does in a frame (Bad News Baseball: 128; at 96 or fewer the bench never reached field play).
 - **Lag**: check with the reference whether the original finishes its logic within each frame in the busy
   scenes. If it doesn't, game time on the NES is slower there and the frame model would need cycle budgets
   (not needed for Little League Baseball).
@@ -96,6 +100,16 @@ in a different scene). Bank switches dominate when a game calls code in other ba
   addressing. `(zp),y` reads are almost always ROM.
 - Any I/O done through C costs ~60–80 instructions; anything done per frame dozens of times belongs in assembly.
 - After every translator change: regenerate, compare the per-tick checksum with the host over the whole bench.
+
+## 5b. Frame pacing on the Amiga (the loop stays the kit's)
+
+- A 60 Hz game at 50 Hz runs two ticks every fifth frame; once the average fits, those frames are the late ones.
+  Run the next tick in the frame's idle time (`game_tick_ahead`, called at the end of `game_draw` when the last
+  tick's time still fits before the frame ends) with the input the loop would pass; `game_tick` then only counts it.
+- Optional work (screen building while black, CHR-bank retile) runs against a time budget (`sys_beam()`), and
+  after the run-ahead (`video_idle`), never before it.
+- Classify late frames before optimising (`tools/late.py`): start-up tick, black screen-building frames, display
+  spikes, play frames just over. Averages hide all of them.
 
 ## 6. The verdict, before writing code
 
@@ -160,15 +174,15 @@ sections above if a lesson is general.
 ### 2. Bad News Baseball (Tecmo 1990), MMC1, 2026-11
 
 - Load: menus ~2,500, batting 3,500-4,500, field play 6,600-8,300 6502 instructions per frame (NES 70-90% busy);
-  screen loads up to 65,000 in one tick of the frame model.
-- Result: 33.9 fps stock, 43.4 fps with 4 MB fast RAM, checksum equal (also under the user's Kickstart 3.1).
-  Menus and quiet field play reach 50 Hz on fast RAM; late frames come from screen loads, camera cuts and logic
-  just over the frame.
+  screen loads ~600 $2007 writes with the NMI off (one tick of up to 65,000 instructions before slicing).
+- Result: 48.3 fps with 4 MB fast RAM, 37.9 fps stock, checksum equal (an earlier build also under the user's
+  Kickstart 3.1). Late frames left with fast RAM: the start-up tick, screen loads, play frames just over.
 - New: 8x16 sprites, main-thread sprite-0 splits, scroll split by whole tiles, CHR-bank animation (incremental
-  retile), DMC samples, `VERIFY_COV`, `tools/prof.py`, `tools/frames.py`, I/O counting in the frame model, PPU
-  and APU writes in the 68k fast path, pixel comparison of the display against the host reference.
-- Same lesson as the first port, sharper: the big logic win was the bank switch (41 a tick) and the controller,
-  found by counting I/O in the frame model. Three hand-written routines (bank switch, controller, metasprite builder) halved field-play logic.
-- Next time: compare the display harness against `host_render` pixel by pixel from the first display milestone;
-  log per-frame logic and display time before optimising (the average hid the spikes); make the bench input
-  reach game play within ~1,000 ticks from the start.
+  retile), DMC samples, `VERIFY_COV`, `tools/prof.py`/`frames.py`/`late.py`, I/O counting in the frame model, PPU
+  and APU writes in the 68k fast path, pixel comparison against the host reference, load slices, run-ahead, time
+  budgets, sprite clustering in assembly checked against C.
+- Biggest wins: bank switch + controller + metasprite builder by hand (stock 18.6 -> 32 fps early on); on fast RAM
+  the time budgets and the run-ahead (43.4 -> 47.7).
+- Next time: compare the display harness with `host_render` from the first display milestone; log per-frame logic
+  and display time and classify late frames before optimising; re-check the bench scenes after any frame-model
+  change (the RNG follows frame timing); check every new assembly routine against its C twin in a debug build.

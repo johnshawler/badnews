@@ -1,50 +1,43 @@
 PORT REPORT
 Game:                  Bad News Baseball (Tecmo 1990, NES, USA ROM, MMC1 128 KB PRG + 128 KB CHR, 60 Hz)
-Class and route:       Binary 6502 code -> "Assembly or disassembly for a Z80, 6502 or 6809 machine": translated once on
-                       the host (tools/recomp.py) to C (host test) and to 68020 assembly (Amiga), entry points found by
-                       tracing the ROM in a reference NES (tools/nesref) and in the frame model (tools/nesref/verify.c
-                       VERIFY_COV). PPU, mapper, controller and APU replaced by plain-C state (src/nes.c, with 68k fast
-                       paths in src/nes68k.s), an AGA display (src/video.c) and Paula sound (src/sound.c). Started with
-                       tools/new_port.sh from the Little League Baseball port. The user asked for this ROM to be ported.
+Class and route:       Assembly or disassembly for a Z80, 6502 or 6809 machine (here a 6502 binary, ported at the user's
+                       request): traced in a reference NES (tools/nesref), translated once on the host (tools/recomp.py)
+                       to C for the host test and to 68020 assembly for the Amiga; PPU, mapper, controller and APU replaced
+                       by plain-C state (src/nes.c, 68k fast paths in src/nes68k.s), an AGA display (src/video.c) and
+                       Paula sound (src/sound.c). Started with tools/new_port.sh from the Little League Baseball port.
 Display:               planes=4 scroll=1 fetch=0 buffers=1 sprites used=7 (3 attached 64-pixel pairs + sprite 6, reused
                        down the screen) colours=32 (16 background + 16 sprite = the NES's 25 on screen)
-Busiest moment:        field play: camera scrolling in x and y, ~20-40 8x16 NES sprites, crowd animated by CHR-bank
-                       switching, NES CPU 70-90% busy (6,600-8,300 6502 instructions a frame). Not a Step 2 sum: logic
-                       alone is ~45k colour clocks a tick stock and ~17k with fast RAM (x1.2 ticks per frame), display
-                       ~24k a frame (debug build, tools/debug_run.sh + tools/frames.py).
+Busiest moment:        field play: camera scrolling in x and y, 20-40 8x16 NES sprites, crowd animated by CHR-bank switching
+                       = not a Step 2 sum (translated logic dominates); measured with 4 MB fast RAM: logic 15-25k colour
+                       clocks a tick (1.2 ticks a frame), display 20-45k a frame (FEASIBILITY.md, tools/late.py)
 Cut from the original: sprite-behind-background priority (sprites always in front); sprite clusters are dropped when more
-                       than four overlap vertically (seen on the title logo and one batter between innings); a scroll
-                       change at a raster split is shown in whole tiles (the home-run screen's pan moves in 8-pixel
-                       steps) and the intro's vertical split ($2006) is not shown; the crowd animation reaches the
-                       screen a few frames late; the 32-pixel side borders show the backdrop colour; screen loads and
-                       some camera cuts are shown after a few black or frozen frames; very high NES notes are clamped to
-                       Paula's fastest rate; DMC samples are played at half their rate (16.5 kHz) on channel 3 in place
-                       of the noise while they last.
-Stock A1200 bench:     frames=1764 late=835 worst_cck=2977807 avg_cck=66574 budget_cck=71051 worst_pct=4191 avg_pct=93 display_hz=50 shown_fps=33.9
-                       ticks=3000 checksum=8d009aa4  (FS-UAE 3.1.66, tools/port.sh, AROS ROM)
-With 4 MB fast RAM:    frames=2198 late=333 worst_cck=1816676 avg_cck=35829 budget_cck=71051 worst_pct=2556 avg_pct=50 display_hz=50 shown_fps=43.4
-                       ticks=3000 checksum=8d009aa4  (tools/port.sh fast)
-Kickstart 3.1 (40.68): stock: frames=1720 late=879 worst_cck=2969971 avg_cck=68408 budget_cck=71051 worst_pct=4180 avg_pct=96 display_hz=50 shown_fps=33.0
-                       ticks=3000 checksum=8d009aa4
-                       4 MB fast RAM: frames=2198 late=334 worst_cck=1814556 avg_cck=35924 budget_cck=71051 worst_pct=2553 avg_pct=50 display_hz=50 shown_fps=43.4
-                       ticks=3000 checksum=8d009aa4
-                       (tools/bench.sh dist bnb 3000 shot.png --kickstart_file=<the user's ROM> [--fast_memory=4096];
-                       the ROM is not in the repository)
-Host checksum:         8d009aa4 after 3000 ticks  equal
-Frame rate claim:      33.9 fps shown on the stock A1200, 43.4 fps with 4 MB fast RAM, logic at 60 ticks a second (game
-                       time follows the clock). 50 Hz NOT held: tools/port.sh prints FAIL on both. The day-one load
-                       measurement predicted this: field play needs ~80-130k colour clocks of logic per frame on the
-                       stock machine. Menus and quiet field play run at 50 Hz on fast RAM; the late frames there are
-                       screen loads (one tick of up to 65,000 6502 instructions), camera cuts and frames just over 71k.
-                       Hand-written replacements so far: the MMC1 bank switch, the controller read, the metasprite
-                       builder, PPU and APU register writes, OAM DMA, nametable writes.
-                       Cheapest upgrade likely to reach 50 Hz in field play: a 68030 accelerator with fast RAM (not
-                       measured).
-Not done, not tested:  real A1200 hardware; NTSC machines; the sound by ear (checked as a WAV from tools/shost.c, not
-                       listened to); interactive play by a person (1 player mode is translated from traces with random
-                       input, but never played); the intro's split; a 68030 bench; CI (the ROM cannot be committed to
-                       this public repository, so CI has nothing to build).
-How to run:            put the ROM at original/bnb.nes, run tools/make_assets.sh, then tools/port.sh (or tools/build.sh
-                       with the SOURCES line of port.conf). Copy dist/bnb to the Amiga and run "bnb" from a Shell
-                       ("bnb bench 3000" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B.
-                       Keys: cursor keys = pad, X = A, Z or Alt = B, Space = Select, Return/Enter = Start, Esc = quit.
+                       than four overlap vertically (title logo, one batter's bat between innings); a scroll change at a
+                       raster split is shown in whole tiles (the home-run screen's pan moves in 8-pixel steps) and the
+                       intro's vertical split ($2006) is not shown; the crowd animation reaches the screen a few frames late;
+                       screen loads and camera cuts show black frames while the screen is drawn; the 32-pixel side borders
+                       show the backdrop colour; very high NES notes are clamped to Paula's fastest rate; DMC samples play
+                       at half their rate (16.5 kHz) on channel 3 in place of the noise while they last.
+Stock A1200 bench:     frames=1915 late=606 worst_cck=1907235 avg_cck=67964 budget_cck=71051 worst_pct=2684 avg_pct=95 display_hz=50 shown_fps=37.9
+                       ticks=3000 checksum=b9481e88  (FS-UAE 3.1.66, tools/port.sh, AROS ROM)
+With 4 MB fast RAM:    frames=2422 late=85 worst_cck=1057530 avg_cck=37932 budget_cck=71051 worst_pct=1488 avg_pct=53 display_hz=50 shown_fps=48.3
+                       ticks=3000 checksum=b9481e88  (tools/port.sh fast)
+Host checksum:         b9481e88 after 3000 ticks  equal
+Frame rate claim:      48.3 fps shown with 4 MB fast RAM, 37.9 fps on the stock A1200, logic at 60 ticks a second (game time
+                       follows the clock). 50 Hz NOT held on either: tools/port.sh prints FAIL on both. Where the late
+                       vertical blanks come from, measured in a debug build of the same bench with fast RAM (tools/debug_run.sh
+                       + tools/late.py; 102 late there, the profiler costs a little): 15 the game's one-time start-up (one
+                       tick of ~1.1 million colour clocks), 42 black frames while a new screen is built (two 128-write slices
+                       of the load code in one frame), 45 play frames that need two ticks and land a few thousand colour
+                       clocks over the frame.
+                       The day-one load measurement predicted that the stock machine cannot hold 50 Hz in field play.
+                       Cheapest upgrade likely to reach 50 Hz in play: a 68030 accelerator with fast RAM (not measured).
+                       Emulator results are an upper bound: the final judge is "bnb bench 3000" on a real A1200 with fast RAM.
+Not done, not tested:  real A1200 hardware; NTSC machines; Kickstart 3.1 (the user's ROM ran an earlier build of the bench with
+                       an equal checksum, this build was not re-run on it); the sound by ear (checked as a WAV from
+                       tools/shost.c); interactive play by a person (1 player mode is translated from traces with random
+                       input, never played); the intro's split; a 68030 bench; CI (the ROM cannot be committed to this public
+                       repository, so CI has nothing to build).
+How to run:            put the ROM at original/bnb.nes, run tools/make_assets.sh, then tools/port.sh (or tools/build.sh with
+                       the SOURCES line of port.conf). Copy dist/bnb to the Amiga and run "bnb" from a Shell ("bnb bench
+                       3000" for the proof run). Joystick in port 2: stick = pad, fire = A, second fire = B. Keys: cursor
+                       keys = pad, X = A, Z or Alt = B, Space = Select, Return/Enter = Start, Esc = quit.

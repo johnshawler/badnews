@@ -88,3 +88,37 @@ in `NOTES.md`; the measured results are in `REPORT.txt`; the backlog is `PIPELIN
   not finish. Script the menus quickly and keep the bench at 3,000 ticks of mostly game play.
 - The user's Kickstart 3.1 ROM works with `tools/bench.sh ... --kickstart_file=<rom>`; same checksum, about the
   same speed as the AROS ROM.
+
+## 7. Second round: 4 MB fast RAM, 43.4 -> 48.3 fps (stock went 33.9 -> 37.9 on the way)
+
+The user asked to focus on the fast-RAM machine. Every step kept the checksum equal (and verify.c = host).
+
+| Change | fps (4 MB) |
+| --- | --- |
+| Start of the round | 43.4 |
+| Screens built until 60,000 colour clocks into the frame (time budget, `sys_beam()`), not a fixed tile count | 44.7 |
+| Run the next tick in the frame's idle time (`game_tick_ahead`): the fifth frame no longer does two ticks | 45.6 |
+| Edges checked only when the camera moves; crowd retile only in spare time | 46.1 |
+| Slices: NMI-off screen loads end the tick every 128 $2007 writes (a 600-write load was one tick of 300-900k) | ~46 (other scenes in the bench) |
+| Dirty flags cleared at once after a load; budget minimum 8 tiles | 46.9 |
+| While black: draw to 30,000, run ahead, then draw on (`video_idle`) | 47.7 |
+| Sprite clustering in assembly (checked against C every frame: 0 differences) | 48.2 |
+| `spr_put` byte-aligned path; a2 saved (a latent bug); cache keyed by tile pixels; adaptive run-ahead | 48.4 / 48.3 |
+
+What I learnt:
+- **Classify the late frames before optimising** (`tools/late.py`): long single ticks, black building frames,
+  display spikes, or frames just over. Each class has a different fix; averages hid all of them.
+- **Time budgets, not counts**, for work that may be spread: `sys_beam()` tells how much of the frame is left.
+- **Run ahead**: on a 60-tick game at 50 Hz the two-tick frames dominate once the average fits. Running the next
+  tick in idle time (same input as the loop would pass) flattens them, and the checksum proves it changes nothing.
+- **Slices** must be at least what the NES does in a frame: the game's NMI-off bursts are all ~600-write screen
+  loads; at 96 writes or fewer the bench never reached field play (not understood; 128 and 112 play normally).
+- **Check assembly against C inside debug builds** (both run, outputs compared): it found a latent a2 clobber in
+  `spr_put` at once. Debug checks must be opt-in (`-DVIDEO_CHECK`), or they distort the timings.
+- The frame model change replays a different game (the RNG follows frame timing): re-check the bench reaches the
+  busiest scenes after each such change (`out/benchsearch`-style host driver counting field-play ticks).
+
+What is left (fast RAM): the start-up tick (~15 late), screen loads with two slices in a frame (~40), and play
+frames that need two ticks and land a few thousand colour clocks over (~45). Next: cheaper load code (the
+meta-tile expansion around the $2007 loop), sprite list bookkeeping in assembly (`build_sprites`, `group_sig`),
+a 68030 bench.

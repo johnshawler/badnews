@@ -184,7 +184,7 @@ _wait:  bsr     _store_state
 _io_rd:                                 ; a0 = address -> d4
         move.w  ccr,-(sp)
         cmpa.w  #$4016,a0               ; the controller: done here, as nes_io_read() does it
-        bne.s   .slow
+        bne     .slow
         move.b  _pad_shift,d4
         tst.b   _pad_strobe
         bne.s   .1
@@ -212,23 +212,88 @@ _rd_s0:                                 ; $2002 read in a sprite 0 wait -> d4
         movem.l (sp)+,d0-d1/a0-a1
         move.w  (sp)+,ccr
         rts
-_io_wr_d0:                              ; a0 = address, value in d0 / d1 / d2
+;  a0 = address, value in d0 / d1 / d2 / d4. Keep every register but d3/d4, and the flags.
+; Writes to $2007 (the PPU data port: screen loads write it thousands of times) take a lean path first that
+; saves only the flags and a0.
+_io_wr_d0:
         move.w  ccr,-(sp)
-        movem.l d0-d1/a0-a1,-(sp)
         moveq   #0,d4
         move.b  d0,d4
+        cmpa.w  #$2007,a0
+        beq     _vram_fast
+        movem.l d0-d1/a0-a1,-(sp)
         bra     _io_wr
 _io_wr_d1:
         move.w  ccr,-(sp)
-        movem.l d0-d1/a0-a1,-(sp)
         moveq   #0,d4
         move.b  d1,d4
+        cmpa.w  #$2007,a0
+        beq     _vram_fast
+        movem.l d0-d1/a0-a1,-(sp)
         bra     _io_wr
 _io_wr_d2:
         move.w  ccr,-(sp)
-        movem.l d0-d1/a0-a1,-(sp)
         moveq   #0,d4
         move.b  d2,d4
+        cmpa.w  #$2007,a0
+        beq     _vram_fast
+        movem.l d0-d1/a0-a1,-(sp)
+        bra     _io_wr                  ; (the first port fell through into _set_prg here)
+
+; $2007 with vertical mirroring into a nametable: as the $2007 case of _io_wr below, the flags on the stack
+_vram_fast:
+        move.l  a0,-(sp)
+        move.b  _mmc_ctrl,d3
+        and.b   #3,d3
+        cmp.b   #2,d3
+        bne     .slow
+        move.w  _ppu_v,d3
+        and.w   #$3fff,d3
+        cmp.w   #$2000,d3
+        bcs     .slow
+        cmp.w   #$3f00,d3
+        bcc     .slow
+        and.w   #$7ff,d3
+        lea     _nes_vram,a0
+        cmp.b   (a0,d3.w),d4
+        beq.s   .inc
+        move.b  d4,(a0,d3.w)
+        lea     _nes_dirty_flag,a0
+        tst.b   (a0,d3.w)
+        bne.s   .inc
+        move.w  _nes_ndirty,d4
+        cmp.w   #1024,d4                ; NES_DIRTY_MAX
+        bcs.s   .mk
+        move.b  #1,_nes_redraw_all
+        bra.s   .inc
+.mk     move.b  #1,(a0,d3.w)
+        lea     _nes_dirty,a0
+        add.w   d4,d4
+        move.w  d3,(a0,d4.w)
+        addq.w  #1,_nes_ndirty
+.inc    moveq   #1,d3
+        btst    #2,_ppu_ctrl
+        beq.s   .i1
+        moveq   #32,d3
+.i1     add.w   d3,_ppu_v
+        btst    #7,_ppu_ctrl            ; NMI off: count towards a slice (nes.h)
+        bne.s   .out
+        tst.b   _nes_in_nmi
+        bne.s   .out
+        addq.w  #1,_nes_slice_count
+        cmp.w   #128,_nes_slice_count   ; NES_SLICE (src/nes.h)
+        bcs.s   .out
+        clr.w   _nes_slice_count
+        movem.l d0-d1/a1,-(sp)          ; C may change these
+        jsr     _nes_slice
+        movem.l (sp)+,d0-d1/a1
+.out    move.l  (sp)+,a0
+        move.w  (sp)+,ccr
+        rts
+.slow   move.l  (sp)+,a0                ; anything else: the general path
+        movem.l d0-d1/a0-a1,-(sp)
+        bra     _io_wr
+
 _set_prg:                               ; d4 = new MMC1 PRG register: as five serial writes would leave it
         move.b  _mmc_ctrl,d3            ; (the flags are not kept: the hand-written callers set them after)
         and.b   #$0c,d3

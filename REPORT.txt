@@ -13,8 +13,8 @@ Busiest moment:        field play: camera scrolling in x and y, 20-40 8x16 NES s
 Cut from the original: sprite-behind-background priority (sprites always in front); sprite clusters are dropped when more
                        than four overlap vertically and two cannot share one 64-pixel sprite (the title logo); a scroll change at a
                        raster split is shown in whole tiles (the home-run screen's pan moves in 8-pixel steps); the crowd animation reaches the screen a few frames late;
-                       screen loads and camera cuts show black frames while the screen is drawn; the borders around the 256x240
-                       NES picture are black (edge columns masked to the pixel, sprites clipped at x 256); very high NES notes are clamped to Paula's fastest rate; DMC samples (the umpire's
+                       screen loads and camera cuts show black frames while the screen is drawn; the borders around the 256x224
+                       picture are black (NES lines 8-231 shown, as on an NTSC TV; edge columns masked to the pixel, sprites clipped at x 256); very high NES notes are clamped to Paula's fastest rate; DMC samples (the umpire's
                        voice, copied to chip RAM at start) play at half their rate (16.5 kHz) on channel 3 in place of the noise while they last.
 Stock A1200 bench:     frames=1761 late=744 worst_cck=771253 avg_cck=78530 budget_cck=71051 worst_pct=1085 avg_pct=110 display_hz=50 shown_fps=35.1
                        ticks=3000 checksum=b3a08e85  (FS-UAE 3.1.66, tools/port.sh, AROS ROM)

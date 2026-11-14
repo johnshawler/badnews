@@ -160,3 +160,7 @@ The user played the ADF again and saw three more things that no bench number sho
   the same lines, and the fifth (the third batter's face) was dropped. Before dropping a cluster, `free_chan()`
   merges two narrow clusters on other channels into one 64-pixel sprite. Those frames now match the reference
   exactly (were ~400 pixels off).
+- **Crowd at the top of field play** (third report): the game streams the row it is about to scroll in through
+  NES lines 0-7, which an NTSC TV never shows; the reference renderer shows it too, so the pixel comparison could
+  not flag it. The view is now 224 lines (`view_h`) of NES lines 8-231: one scroll offset and a sprite y shift,
+  no cost per frame (46.4 fps, as before). Lesson: show what a TV showed, not the whole 240 lines.

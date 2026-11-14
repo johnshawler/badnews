@@ -24,7 +24,7 @@ void disp_scroll(LONG x, LONG y) { scx = x; scy = y; }
 void disp_begin(void) {}
 void disp_sprite(UWORD n, UWORD *d, WORD x, WORD y, UWORD h, UWORD a)
 {   /* the same control words as kit/disp.c writes */
-    UWORD hs = (UWORD)(x + 0x80), vs = (UWORD)(y + 0x34), ve = (UWORD)(vs + h);
+    UWORD hs = (UWORD)(x + 0x80), vs = (UWORD)(y + 0x2c + (256 - cfg.view_h) / 2), ve = (UWORD)(vs + h);
     if (n > 6) return;
     spr[n] = d;
     {   UWORD p = (UWORD)(((vs & 0xff) << 8) | ((hs >> 1) & 0xff));
@@ -36,10 +36,11 @@ void disp_sprite_off(UWORD n) { spr[n] = 0; }
 static void shot(const char *name)
 {
     static ULONG img[240][320]; int x, y, p, n; FILE *f;
+    int top = (240 - cfg.view_h) / 2;   /* the picture holds NES lines 0-239; lines outside the view are black */
     for (y = 0; y < 240; y++) for (x = 0; x < 320; x++) {
-        ULONG off = (ULONG)(y + scy) * 64 + ((scx + x + 64) >> 3); int b = 7 - ((scx + x) & 7), c = 0;
+        ULONG off = (ULONG)(y - top + scy) * 64 + ((scx + x + 64) >> 3); int b = 7 - ((scx + x) & 7), c = 0;
         for (p = 0; p < 4; p++) c |= ((disp_front[off + p * disp_plane] >> b) & 1) << p;
-        img[y][x] = pal[c];
+        img[y][x] = (y < top || y >= top + cfg.view_h) ? 0 : pal[c];
     }
     for (n = 0; n < 7; n += 1) {            /* walk each sprite list: segments of (pos, ctl, lines) */
         UBYTE *d = (UBYTE *)spr[n], *o; int odd = n & 1;
@@ -55,10 +56,10 @@ static void shot(const char *name)
             vs |= (ctl & 4) << 6; ve |= (ctl & 2) << 7;
             if (ve <= vs) { fprintf(stderr, "sprite %d: bad segment vs %d ve %d\n", n, vs, ve); break; }
             for (l = 0; l < ve - vs; l++) for (x = 0; x < 64; x++) {
-                UBYTE *line = d + 16 + l * 16, *ol = o ? o + 16 + l * 16 : 0; int bx = x >> 3, bt = 7 - (x & 7), v, X = hs - 0x80 + x, Y = vs - 0x34 + l;
+                UBYTE *line = d + 16 + l * 16, *ol = o ? o + 16 + l * 16 : 0; int bx = x >> 3, bt = 7 - (x & 7), v, X = hs - 0x80 + x, Y = vs - (0x2c + (256 - cfg.view_h) / 2) + top + l;
                 v = ((line[bx] >> bt) & 1) | (((line[8 + bx] >> bt) & 1) << 1);
                 if (ol) v |= (((ol[bx] >> bt) & 1) << 2) | (((ol[8 + bx] >> bt) & 1) << 3); else if (v) v |= 12;
-                if (v && X >= 0 && X < 320 && Y >= 0 && Y < 240) img[Y][X] = pal[16 + v];
+                if (v && X >= 0 && X < 320 && Y >= top && Y < top + cfg.view_h) img[Y][X] = pal[16 + v];
             }
             d += 16 + (ve - vs) * 16; if (o) o += 16 + (ve - vs) * 16;
         }

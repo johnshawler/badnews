@@ -149,6 +149,8 @@ Say the verdict in the report from the start; name the upgrade.
   per-tile cache of what it was drawn from (`tsrc`) when the edge moves across it; check only the columns near the
   two edges unless the camera jumps. Clip sprite clusters at x 256 too. Blanking whole columns (with a one-column
   hysteresis) left up to 15 pixels of overscan that the user saw at once.
+- Show NES lines 8-231 (`view_h` 224, scroll + 8, sprite y - 8), as an NTSC TV did: games stream the next row
+  through the top 8 lines, and it shows (crowd at the top of field play). The reference renderer shows it too.
 - More than four sprite clusters on the same lines: before dropping one, merge two narrow clusters on different
   channels into one 64-pixel sprite (`free_chan`); the between-innings batters lost their faces without it.
 - Horizontal mirroring (stacked nametables, vertical scrolling scenes): each buffer copy of a tile row holds its own

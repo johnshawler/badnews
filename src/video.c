@@ -60,7 +60,12 @@ ULONG vlast[8];                         /* debug: the same parts for the last fr
 #define VP(i, x) do { x; } while (0)
 #endif
 
-const DispCfg video_display = { PLANES, 1, 0, 240, 480, LEVEL_W, 1, 0, SPR_W, 1 };
+/* NES lines 0-7 and 232-239 are not shown, as on an NTSC TV (and most emulators): the game streams the rows it
+   is about to scroll in there (the crowd showed at the top of field play). The view is 224 lines of NES lines 8-231. */
+#define NES_CROP 8
+#define VIEW_H   (240 - 2 * NES_CROP)
+#define DIW_TOP  (0x2c + (256 - VIEW_H) / 2)    /* as kit/disp.c places the view */
+const DispCfg video_display = { PLANES, 1, 0, VIEW_H, 480, LEVEL_W, 1, 0, SPR_W, 1 };
 
 extern const uint8_t nes_chr_data[];
 
@@ -810,8 +815,8 @@ VSTATIC void build_sprites(void)
         if (!c->n) { disp_sprite_off((UWORD)ne); if (no >= 0) disp_sprite_off((UWORD)no); continue; }
         for (s = 0; s < c->n; s++) {
             Group *g = c->seg[s];
-            WORD x = (WORD)(g->x0 + VIEW_X), y = g->y0, h = (WORD)(g->y1 - g->y0);
-            UWORD hs = (UWORD)(x + 0x80), vs = (UWORD)(y + 0x34), ve = (UWORD)(vs + h);
+            WORD x = (WORD)(g->x0 + VIEW_X), y = (WORD)(g->y0 - NES_CROP), h = (WORD)(g->y1 - g->y0);
+            UWORD hs = (UWORD)(x + 0x80), vs = (UWORD)(y + DIW_TOP), ve = (UWORD)(vs + h);
             n = h * 16;
             if (s == 0) {                       /* the first control words: the kit writes them */
                 disp_sprite((UWORD)ne, (UWORD *)e, x, y, (UWORD)h, 0);
@@ -1021,7 +1026,7 @@ void video_frame(void)
 #endif
         draw_overlay(split_line, yup, sy, vlo, vhi);
     }
-    disp_scroll(cam_ux - VIEW_X, sy);
+    disp_scroll(cam_ux - VIEW_X, sy + NES_CROP);
     if ((ppu_mask & 0x10) && on) {
         /* the sprite lists only change when the sprites or their tile set do */
         static UBYTE last_oam[256], last_state[8];

@@ -48,6 +48,13 @@ static UBYTE dmc_state;                 /* 0 channel 3 plays the noise, 1 its DM
 static const UBYTE *dmc_e;
 static WORD dmc_ticks;                  /* ticks the sample still plays */
 
+ULONG snd_dbg[8];                       /* debug builds: DMC starts seen, found, played, ended early, ended */
+#ifdef LOGIC_TRACE
+#define SND_DBG(x) (x)
+#else
+#define SND_DBG(x) ((void)0)
+#endif
+static const UBYTE *dmc_pcm;            /* a chip RAM copy of nes_dmc: the linker does not keep data_c (NOTES.md) */
 static const UBYTE *dmc_find(UBYTE addr, UBYTE len)
 {
     int i;
@@ -70,6 +77,13 @@ int sound_load(void)
         for (i = 0; i < 8; i++) wave_pulse[d][i] = (duty_seq[d] & (0x80 >> i)) ? 60 : -60;
     }
     if (!(silence = sys_alloc(4, MEMF_CHIP | MEMF_CLEAR))) return 0;
+    {   ULONG size = 256;                       /* the samples, read by Paula: chip RAM */
+        for (i = 0; i < 16 && BE16(nes_dmc + i * 16 + 8); i++) {
+            ULONG end = BE32(nes_dmc + i * 16 + 4) + 2UL * BE16(nes_dmc + i * 16 + 8);
+            if (end > size) size = end;
+        }
+        if (!(dmc_pcm = sys_chip_copy(nes_dmc, size))) return 0;
+    }
     if (!(wave_tri = sys_alloc(16, MEMF_CHIP))) return 0;
     for (i = 0; i < 16; i++) wave_tri[i] = (BYTE)((i < 8 ? 15 - 2 * i : 2 * i - 17) * 8);
     for (d = 0; d < 2; d++) {                   /* NES noise: 15-bit LFSR, feedback from bit 1 (long) or bit 6 */
@@ -87,6 +101,9 @@ int sound_load(void)
 static void set_chan(int n, BYTE *ptr, UWORD words, UWORD per, UWORD vol)
 {
     if (per < 124) per = 124;                   /* Paula's fastest DMA rate */
+#ifdef SND_ONLY_DMC
+    vol = 0;                                    /* debug: only the DMC samples are heard */
+#endif
     if (ptr != cur_ptr[n]) { PAULA->aud[n].ac_ptr = (UWORD *)ptr; PAULA->aud[n].ac_len = words; cur_ptr[n] = ptr; }
     if (per != cur_per[n]) { PAULA->aud[n].ac_per = per; cur_per[n] = per; }
     if (vol != cur_vol[n]) { PAULA->aud[n].ac_vol = vol; cur_vol[n] = vol; }
@@ -190,20 +207,26 @@ void sound_frame(void)
     }
     /* DMC: a sample started ($4015 bit 4) takes channel 3: DMA off this frame, the sample from the next one, then
        silence as its loop; the channel goes back to the noise when the sample's time is over */
+    SND_DBG((trig & 0x10) && (snd_dbg[0]++, (en & 0x10) && snd_dbg[1]++, dmc_find(apu_reg[0x12], apu_reg[0x13]) && snd_dbg[2]++));
     switch (dmc_state) {
     case 1:
-        PAULA->aud[3].ac_ptr = (UWORD *)(nes_dmc + BE32(dmc_e + 4)); PAULA->aud[3].ac_len = BE16(dmc_e + 8);
-        PAULA->aud[3].ac_per = BE16(dmc_e + 10); PAULA->aud[3].ac_vol = 50;
+        SND_DBG(snd_dbg[3]++);
+        PAULA->aud[3].ac_ptr = (UWORD *)(dmc_pcm + BE32(dmc_e + 4)); PAULA->aud[3].ac_len = BE16(dmc_e + 8);
+        PAULA->aud[3].ac_per = BE16(dmc_e + 10); PAULA->aud[3].ac_vol = 64;
         PAULA->dmacon = DMAF_SETCLR | DMAF_AUD3;
         dmc_ticks = (WORD)(BE16(dmc_e + 12) * 6 / 5 + 1);
         dmc_state = 2;
         break;
     case 2:
+#ifndef DMC_NOSILENCE
         PAULA->aud[3].ac_ptr = (UWORD *)silence; PAULA->aud[3].ac_len = 1;
+#endif
         dmc_state = 3;
         /* fall through */
     case 3:
+        SND_DBG((snd_dbg[6]++, snd_dbg[7] += ticks));
         dmc_ticks -= (WORD)ticks;
+        SND_DBG((dmc_ticks <= 0 || !(en & 0x10)) && snd_dbg[dmc_ticks <= 0 ? 5 : 4]++);
         if (dmc_ticks <= 0 || !(en & 0x10)) { dmc_state = 0; cur_ptr[3] = 0; cur_per[3] = 0; cur_vol[3] = 0xffff; }
         break;
     }

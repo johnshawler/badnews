@@ -143,8 +143,14 @@ Say the verdict in the report from the start; name the upgrade.
 - CHR-bank animation of the background: never redraw everything; compare the two 4 KB banks tile by tile and
   redraw the visible cells whose tile differs, a few columns a frame (`retile_step`). Each column remembers the
   banks it was drawn with; restart a column being streamed when the bank changes.
-- Blank the border columns (outside the 256-pixel NES picture) when they leave the picture. For a black border,
-  draw palette-0 colour-0 pixels as index 4 (a copy of the backdrop) and set index 0 to black.
+- Black border: draw palette-0 colour-0 pixels as index 4 (a copy of the backdrop) and set index 0 to black. The
+  columns that straddle the picture's two edges at a fine scroll are drawn through a pixel mask (`edge_mask`,
+  `tile8m` masks in registers), columns wholly outside are drawn black, and an edge column is drawn again from a
+  per-tile cache of what it was drawn from (`tsrc`) when the edge moves across it; check only the columns near the
+  two edges unless the camera jumps. Clip sprite clusters at x 256 too. Blanking whole columns (with a one-column
+  hysteresis) left up to 15 pixels of overscan that the user saw at once.
+- More than four sprite clusters on the same lines: before dropping one, merge two narrow clusters on different
+  channels into one 64-pixel sprite (`free_chan`); the between-innings batters lost their faces without it.
 - Horizontal mirroring (stacked nametables, vertical scrolling scenes): each buffer copy of a tile row holds its own
   world row (`world_row`). A `$2006` split gives the lower part its own vertical scroll: follow it with the hardware
   scroll and redraw the upper part over it each frame (`draw_overlay`).
@@ -153,6 +159,12 @@ Say the verdict in the report from the start; name the upgrade.
 - Sound: APU model (length, envelope, sweep, linear counter, 240 Hz sequencer) → Paula periods and volumes with
   looped one-period waveforms. DMC: list the game's samples in `tools/games/<game>.py` (print `apu_reg` when
   `apu_trig` bit 4 is set), `tools/dmc.py` converts them on the host; a sample takes Paula channel 3 for its time.
+  The game's own sample table lists them all (here bank 4, opcode `$F9 rate addr len` in its sound scripts):
+  compare it with the list. **Everything Paula, the blitter or the sprites read must be copied to chip RAM with
+  `sys_chip_copy()`**: with the current crosstools linker a vasm `data_c` section loses its chip flag, so on a
+  fast-RAM machine the samples loaded into fast RAM and played as one click. Listen on both machines:
+  `tools/bench_audio.sh out.wav N [--fast_memory=4096]` records the emulator (OpenAL Soft's wave backend) and
+  `tools/wavscan.py` shows where it is loud.
 - Develop both on the host harnesses (`tools/vhost.c`, `tools/shost.c`), then confirm on the emulator. Compare the
   display harness with `src/host_render.c` pixel by pixel every few ticks: it found every display bug of the
   second port.
@@ -194,3 +206,7 @@ sections above if a lesson is general.
 - Next time: compare the display harness with `host_render` from the first display milestone; log per-frame logic
   and display time and classify late frames before optimising; re-check the bench scenes after any frame-model
   change (the RNG follows frame timing); check every new assembly routine against its C twin in a debug build.
+- After the user played the ADF (two rounds): flashing, border colour, the intro, overscan, silent voices and lost
+  faces were all invisible in bench numbers. Final: 46.4 fps fast RAM, 35.1 stock. Next time: look at every scene
+  type (intro, title, menus, between innings) next to the reference early, listen on the fast-RAM configuration
+  (`tools/bench_audio.sh`), and never trust a `data_c` section: `sys_chip_copy()`.

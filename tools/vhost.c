@@ -83,6 +83,7 @@ int main(int argc, char **argv)
         video_frame(); video_idle();
         snprintf(key, sizeof key, ",%u,", t + 1);
         if (strstr(list, key)) { snprintf(name, sizeof name, "vhost_%05u.ppm", t + 1); shot(name);
+            if (getenv("OAMDUMP")) { int q; for (q = 0; q < 64; q++) if (nes_oam[q*4] < 0xef) printf("oam %2d y %3d t %02x a %02x x %3d\n", q, nes_oam[q*4], nes_oam[q*4+1], nes_oam[q*4+2], nes_oam[q*4+3]); }
             if (getenv("VSTATE")) printf("tick %u ctrl %02x mask %02x mmc %02x/%02x/%02x split %d line %d ctrl %02x chr %02x/%02x\n", t + 1, ppu_ctrl, ppu_mask, mmc_ctrl, mmc_chr0, mmc_chr1, split_on, split_line, split_ctrl, split_chr0, split_chr1); }
     }
     { extern unsigned long vstat[3]; printf("sprite clusters dropped: %d; groups kept %lu copied %lu drawn %lu\n", video_sprites_dropped, vstat[0], vstat[1], vstat[2]); }

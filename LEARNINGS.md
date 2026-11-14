@@ -136,3 +136,27 @@ a 68030 bench.
   sprite-0 hit on every read, so the intro loop (synced only by the hit) ran ~250 passes in one tick: a second
   sprite-0 wait in one frame now ends the frame (`nes_s0_frame`, in C, 68k and verify.c). That also removed the
   "start-up tick" of 480,000 instructions. Lesson: look at the attract mode, not only the bench.
+
+## 9. Second ADF round: overscan, silent voices, broken faces
+
+The user played the ADF again and saw three more things that no bench number showed.
+
+- **Overscan in field play**: the first border fix blanked whole columns when they left the picture and kept the
+  column next to it (a hysteresis against a wobbling camera), so up to 15 pixels beside the picture showed the
+  field. Now the two columns that straddle the picture's edges are drawn through a pixel mask (`tile8m` in
+  assembly, masked in registers, so it writes no more than `tile8`); columns wholly outside are drawn black; an
+  edge column is drawn again from a cache of each tile's source when the edge moves across it, and only the
+  columns near the two edges are checked unless the camera jumps. Sprite clusters are clipped at x 256 as on the
+  NES. Pixel comparison: no pixel outside the picture in any of 120 bench frames; the frames inside are as before.
+  Cost: about 1 fps with fast RAM (47.4 -> 46.4); first attempt cost 2 fps (masking in C, and columns outside the
+  picture drawn and then masked).
+- **Silent voices**: the samples were triggered, found and timed correctly on the Amiga (debug counters), and the
+  host sound simulation played them. Recording the emulator's audio (`tools/bench_audio.sh`, OpenAL Soft's wave
+  backend) showed one 0.4 ms click per voice with 4 MB fast RAM and the full voice on the stock machine: the
+  samples' `data_c` hunk had lost its chip RAM flag in the link (no hunk of the executable has it), so with fast
+  RAM the samples were loaded where Paula cannot read them. `sys_chip_copy()` at load time fixed it. Lesson: when
+  sound is reported missing, listen on the machine configuration the user runs, and read the hunk flags.
+- **Faces between innings**: three batters stand side by side; their face and bat sprites made five clusters on
+  the same lines, and the fifth (the third batter's face) was dropped. Before dropping a cluster, `free_chan()`
+  merges two narrow clusters on other channels into one 64-pixel sprite. Those frames now match the reference
+  exactly (were ~400 pixels off).

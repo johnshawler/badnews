@@ -171,6 +171,8 @@ int main(int argc, char **argv)
                 ULONG cbase = (ULONG)game_tick, vbase = (ULONG)tile8, magic = 0x50524f33; /* "PRO3": 3 hunk addresses */
                 if (fh) { Write(fh, &magic, 4); Write(fh, &base, 4); Write(fh, &cbase, 4); Write(fh, &vbase, 4); Write(fh, prof_buf, prof_cnt * 4); Close(fh); } }
             {   extern UBYTE vspr_dump[]; fh = Open((CONST_STRPTR)"sprdiff.bin", MODE_NEWFILE); if (fh) { Write(fh, vspr_dump, 800); Close(fh); } }
+            {   extern ULONG snd_dbg[]; char b[120]; sprintf(b, "dmc trig %lu en %lu found %lu started %lu cut %lu ended %lu frames %lu ticks %lu\n", snd_dbg[0], snd_dbg[1], snd_dbg[2], snd_dbg[3], snd_dbg[4], snd_dbg[5], snd_dbg[6], snd_dbg[7]);
+                fh = Open((CONST_STRPTR)"sound.txt", MODE_NEWFILE); if (fh) { Write(fh, b, strlen(b)); Close(fh); } }
             {   fh = Open((CONST_STRPTR)"frames.bin", MODE_NEWFILE); if (fh) { Write(fh, frame_log, frame_n * 36); Close(fh); } }
             {   extern uint32_t logic_time[]; fh = Open((CONST_STRPTR)"ticktime.bin", MODE_NEWFILE);
                 if (fh) { Write(fh, logic_time, logic_ntrace * 4); Close(fh); } }

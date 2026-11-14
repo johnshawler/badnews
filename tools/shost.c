@@ -5,6 +5,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "exec/types.h"
 #include "hardware/custom.h"
 #include "nes.h"
@@ -14,6 +15,7 @@
 struct Custom paula;
 uint8_t nes_prg_data[0x20000], nes_chr_data[0x20000];
 void *sys_alloc(ULONG size, ULONG f) { (void)f; return calloc(1, size); }
+void *sys_chip_copy(const void *s, ULONG n) { void *d = malloc(n); memcpy(d, s, n); return d; }
 
 int main(int argc, char **argv)
 {

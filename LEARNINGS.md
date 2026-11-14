@@ -164,3 +164,23 @@ The user played the ADF again and saw three more things that no bench number sho
   NES lines 0-7, which an NTSC TV never shows; the reference renderer shows it too, so the pixel comparison could
   not flag it. The view is now 224 lines (`view_h`) of NES lines 8-231: one scroll offset and a sprite y shift,
   no cost per frame (46.4 fps, as before). Lesson: show what a TV showed, not the whole 240 lines.
+
+## 10. Judder when the ball is hit, and the ball's sound
+
+- **Judder**: the per-frame log (`tools/debug_run.sh`, `frames.bin`) showed that during the ball's flight frames took
+  two vertical blanks and the next one jumped three ticks. The largest part of those frames was the edge masking
+  added for the overscan (14,000-37,000 colour clocks: two tile columns of byte writes to chip RAM in every frame
+  the camera moved). Doing it with the blitter was worse: with the kit's blitter-hog setting the CPU waits for
+  the bus anyway, and a column blit moves six times more data than the CPU writes. The fix costs nothing: the
+  display window (`DIWSTRT`/`DIWSTOP`) is narrowed to the 256 x 224 picture at every vertical blank, from the
+  kit's vertical-blank hook, after the copper set the kit's 320-pixel window. The chipset then hides the columns
+  that cross the edges and the sprites beyond them; edge masks, sprite clipping and blanking columns that leave
+  the picture all went. A column outside is redrawn when it comes in only if a cell changed meanwhile. 4 MB fast
+  RAM: 46.4 -> 47.7 fps, late frames 177 -> 112. What is left is mostly the 60-to-50 tick pattern (every fifth
+  frame shows two ticks) and frames where logic and sprites still do not fit.
+- **Ball sound**: the game starts pulse 2 with the hardware sweep on and never writes the period again; the sweep
+  raises the pitch while the ball climbs, then the game switches it to falling. `sound_frame` copied the period
+  register into the channel every frame, undoing the sweep: a flat tone. The period is now reloaded only when the
+  game writes it (`apu_wr`, set by `src/nes.c` and the 68k fast path), and a sweep register write restarts the
+  sweep divider. Checked on the host (`PER1=` in `tools/shost.c`) and in an emulator recording of pulse 2 alone
+  (`-DSND_ONLY_CH=1`, `tools/bench_audio.sh`): 115 Hz rising to 750 Hz and back down.

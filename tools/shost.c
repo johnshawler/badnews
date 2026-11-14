@@ -37,6 +37,7 @@ int main(int argc, char **argv)
             }
         }
         paula.dmacon = 0;
+        if (getenv("PER1") && t >= (unsigned)atoi(getenv("PER1")) && t < (unsigned)atoi(getenv("PER1")) + 120) printf("t%u per1 %d vol1 %d\n", t, paula.aud[1].ac_per, paula.aud[1].ac_vol);
         if (getenv("STATS") && frame % 50 == 0) printf("%3us vol %2d %2d %2d %2d per %4d %4d %4d %4d\n", frame / 50, paula.aud[0].ac_vol, paula.aud[1].ac_vol, paula.aud[2].ac_vol, paula.aud[3].ac_vol, paula.aud[0].ac_per, paula.aud[1].ac_per, paula.aud[2].ac_per, paula.aud[3].ac_per);
         for (i = 0; i < 441; i++) {                             /* 1/50 s at 22050 Hz */
             int lr[2] = {0, 0};

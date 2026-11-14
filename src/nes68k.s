@@ -9,7 +9,7 @@
         xdef    _dispatch,_unwind,_io_rd,_io_wr,_rd_ea,_wr_ea_d0,_php,_plp,_set_prg,_wait   ; for the profiler only
         xref    _cpu_a,_cpu_s,_cpu_x,_cpu_y,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
 ;       _cpu_x,_cpu_y,_cpu_s,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
-        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig,_nes_slice_count,_nes_slice,_nes_in_nmi,_split_seen,_split_v6,_nes_s0_used,_nes_s0_frame
+        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig,_apu_wr,_nes_slice_count,_nes_slice,_nes_in_nmi,_split_seen,_split_v6,_nes_s0_used,_nes_s0_frame
         xref    _nes_io_read,_nes_read_s0,_nes_write_slow,_nes_wait,_nes_fatal,_nes_mmc_prg,_nes_mmc_ctrl
 
 ; ---- moving the 6502 state between the globals and the registers
@@ -495,11 +495,23 @@ _io_wr: cmpa.w  #$2007,a0               ; PPU data port: nametable writes done h
         move.w  d3,d1
         and.w   #3,d1
         cmp.w   #3,d1
-        bne     .done
+        bne     .a2
         lsr.w   #2,d3
         moveq   #0,d1
         bset    d3,d1
         or.b    d1,_apu_trig
+        bra     .done
+.a2     tst.w   d1                      ; $4001/$4002/$4005/$4006: apu_wr bit (reg & 3) - 1 + 2 * pulse (nes.c)
+        beq     .done
+        cmp.w   #8,d3
+        bcc     .done
+        subq.w  #1,d1
+        lsr.w   #2,d3
+        add.w   d3,d1
+        add.w   d3,d1
+        move.b  _apu_wr,d3
+        bset    d1,d3
+        move.b  d3,_apu_wr
         bra     .done
 .strobe                                 ; controller strobe
         move.b  d4,d3

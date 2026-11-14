@@ -40,7 +40,7 @@ static void shot(const char *name)
     for (y = 0; y < 240; y++) for (x = 0; x < 320; x++) {
         ULONG off = (ULONG)(y - top + scy) * 64 + ((scx + x + 64) >> 3); int b = 7 - ((scx + x) & 7), c = 0;
         for (p = 0; p < 4; p++) c |= ((disp_front[off + p * disp_plane] >> b) & 1) << p;
-        img[y][x] = (y < top || y >= top + cfg.view_h) ? 0 : pal[c];
+        img[y][x] = (y < top || y >= top + cfg.view_h || x < 32 || x >= 288) ? 0 : pal[c];   /* the display window (video_vbl) */
     }
     for (n = 0; n < 7; n += 1) {            /* walk each sprite list: segments of (pos, ctl, lines) */
         UBYTE *d = (UBYTE *)spr[n], *o; int odd = n & 1;
@@ -59,7 +59,7 @@ static void shot(const char *name)
                 UBYTE *line = d + 16 + l * 16, *ol = o ? o + 16 + l * 16 : 0; int bx = x >> 3, bt = 7 - (x & 7), v, X = hs - 0x80 + x, Y = vs - (0x2c + (256 - cfg.view_h) / 2) + top + l;
                 v = ((line[bx] >> bt) & 1) | (((line[8 + bx] >> bt) & 1) << 1);
                 if (ol) v |= (((ol[bx] >> bt) & 1) << 2) | (((ol[8 + bx] >> bt) & 1) << 3); else if (v) v |= 12;
-                if (v && X >= 0 && X < 320 && Y >= top && Y < top + cfg.view_h) img[Y][X] = pal[16 + v];
+                if (v && X >= 32 && X < 288 && Y >= top && Y < top + cfg.view_h) img[Y][X] = pal[16 + v];
             }
             d += 16 + (ve - vs) * 16; if (o) o += 16 + (ve - vs) * 16;
         }

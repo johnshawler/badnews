@@ -29,7 +29,7 @@ uint8_t  nes_redraw_all = 1, nes_pal_dirty = 1;
 uint8_t  split_on, split_ctrl, split_chr0, split_chr1, split_fx, split_line, split_seen, split_v6;
 uint16_t split_t;
 
-uint8_t apu_reg[0x18], apu_trig;
+uint8_t apu_reg[0x18], apu_trig, apu_wr;
 uint8_t nes_pad;
 uint8_t pad_shift, pad_strobe;                 /* also used by src/nes68k.s */
 
@@ -234,6 +234,7 @@ void nes_write_slow(uint16_t a, uint8_t v)
             apu_reg[a - 0x4000] = v;
             if ((a & 3) == 3 && a < 0x4010) apu_trig |= (uint8_t)(1 << ((a - 0x4000) >> 2));
             if (a == 0x4015) apu_trig |= 0x10;
+            if (a < 0x4008 && (a & 3) && (a & 3) != 3) apu_wr |= (uint8_t)(1 << ((a & 3) - 1 + 2 * ((a >> 2) & 1)));
         }
         return;
     }

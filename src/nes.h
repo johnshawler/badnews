@@ -73,6 +73,7 @@ extern uint8_t  split_v6;                       /* after the split the game set 
 /* APU: the register file, and which channels were (re)started this frame. The Amiga side plays it. */
 extern uint8_t apu_reg[0x18];
 extern uint8_t apu_trig;
+extern uint8_t apu_wr;                  /* written since sound_frame(): bit 0 $4001, 1 $4002, 2 $4005, 3 $4006 */
 
 /* Controller: buttons in NES order (bit 0 A, 1 B, 2 Select, 3 Start, 4 Up, 5 Down, 6 Left, 7 Right) */
 extern uint8_t nes_pad;

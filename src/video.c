@@ -65,6 +65,19 @@ ULONG vlast[8];                         /* debug: the same parts for the last fr
 #define NES_CROP 8
 #define VIEW_H   (240 - 2 * NES_CROP)
 #define DIW_TOP  (0x2c + (256 - VIEW_H) / 2)    /* as kit/disp.c places the view */
+#ifdef __m68k__
+/* The display window is narrowed to the NES picture (256 x 224) at every vertical blank, after the copper has set
+   the kit's 320-pixel window: the chipset then shows nothing outside the picture, neither the tile columns that
+   cross its edges at a fine scroll nor sprites, at no cost. (Masking the edge columns by CPU or blitter cost up to
+   14,000 colour clocks in every frame the camera moved, and the ball's flight juddered.) Installed as
+   sys_vbl_hook by src/main.c. */
+void video_vbl(void)
+{
+    sys_key_poll();
+    custom->diwstrt = (UWORD)((DIW_TOP << 8) | (0x81 + VIEW_X));
+    custom->diwstop = (UWORD)((((DIW_TOP + VIEW_H) & 0xff) << 8) | ((0x81 + VIEW_X + 256) & 0xff));
+}
+#endif
 const DispCfg video_display = { PLANES, 1, 0, VIEW_H, 480, LEVEL_W, 1, 0, SPR_W, 1 };
 
 extern const uint8_t nes_chr_data[];
@@ -165,42 +178,18 @@ static UWORD nt_cell_w(LONG uc, int w)          /* nametable cell of column uc i
 }
 static UWORD nt_cell(LONG uc, int r) { return nt_cell_w(uc, world_row(r, 1)); }
 
-/* Columns in the 32-pixel borders beside the 256-pixel NES picture are drawn in the backdrop colour: the NES
-   never shows them, and their nametable content belongs to the other side of the wrap. A column is blanked when
-   it leaves the picture and drawn when it enters it (fix_edges). */
-static UBYTE colstate[64];              /* by unwrapped column & 63: 1 drawn from the nametable, 2 drawn blank */
+/* Columns in the 32-pixel borders beside the 256-pixel NES picture are hidden by the display window (video_vbl);
+   they are drawn from the nametable as they stream in, and drawn again when they come into the picture if a cell
+   changed meanwhile (fix_edges). In the NES's hidden left 8 pixels a column is drawn blank (the backdrop). */
+static UBYTE colstate[64];              /* by unwrapped column & 63: 1 drawn from the nametable, 2 drawn blank,
+                                           3 drawn from the nametable but a cell changed while it was outside */
+static UBYTE col_want(LONG uc);
 #define VIDEO_BEAM_STOP 60000          /* colour clocks into the frame: stop extra drawing work here */
 static UBYTE colbank_up[64], colbank_lo[64];    /* by column: the background banks it was drawn with (retile_step) */
 static UBYTE cur_up, cur_lo;            /* the banks the background uses now, above and below the split */
 static UBYTE work_up, work_lo;
 static UBYTE filling;                   /* the picture is black because the screen is still being drawn */
 static WORD fill_sy;          /* the banks the column being streamed was started with */
-static UBYTE emask[64];                 /* by column & 63: the pixels of each tile drawn there (edge columns) */
-/* the pixels of column uc inside the 256-pixel NES picture (bit 7 = leftmost): the columns that straddle its edges
-   are masked to black, so a fine scroll does not show up to 7 pixels of the next column in the border */
-VSTATIC UBYTE edge_mask(LONG uc)
-{
-    LONG x = uc * 8, l = cam_ux, r = cam_ux + 256;
-    UBYTE m = 0xff;
-    if (x + 8 <= l || x >= r) return 0;
-    if (x < l) m &= (UBYTE)(0xff >> (l - x));
-    if (x + 8 > r) m &= (UBYTE)(0xff << (x + 8 - r));
-    return m;
-}
-#ifdef __m68k__
-void tile8m(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"), ULONG m __asm("d1"));   /* src/video68k.s */
-#else
-VSTATIC void tile8m(UBYTE *d, const UBYTE *chr, ULONG attr, ULONG m)
-{
-    int p, y;
-    tile8(d, chr, attr);
-    for (p = 0; p < 4; p++, d += video_plane) for (y = 0; y < 8; y++) d[y * 64] &= (UBYTE)m;
-}
-#endif
-/* what each tile of a column was last drawn from, by column & 63, row and copy: a column across the picture's
-   edge is drawn again each frame the edge moves, from here, without the nametable and attribute lookups */
-typedef struct { const UBYTE *src; ULONG attr; } TileSrc;
-static TileSrc tsrc[64][30][2];
 /* the NES hides its leftmost 8 pixels when PPUMASK bit 1 is clear: the game streams new columns there */
 VSTATIC int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((ppu_mask & 2) ? 0 : 8) && x < cam_ux + 256; }
 
@@ -237,11 +226,7 @@ VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies)
         ULONG zero4;
         const UBYTE *src;
         if (!(copies & c)) continue;
-        if (c == 2 && !hmode && (copies & 1) && last_src) {     /* the same */
-            tile8(d + 240 * 64, last_src, last_attr);
-            tsrc[uc & 63][r][1].src = last_src; tsrc[uc & 63][r][1].attr = last_attr;
-            continue;
-        }
+        if (c == 2 && !hmode && (copies & 1)) { tile8(d + 240 * 64, last_src, last_attr); continue; }   /* the same */
         w = world_row(r, c); nr = w % 30;
         cell = nt_cell_w(sc, w); base = cell & 0x400;
         attr = nes_vram[base | 0x3c0 | ((nr >> 2) << 3) | (tx >> 2)];
@@ -249,21 +234,13 @@ VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies)
         src = nes_chr_data + ((ULONG)(r < split_row ? cur_up : cur_lo) << 12) + (UWORD)nes_vram[cell] * 16;   /* bg_bank() */
         p2 = (pal & 1) ? 0xff : 0; p3 = (pal & 2) ? 0xff : 0;
         zero4 = pal ? 0 : 0x10000;              /* palette 0: its colour-0 pixels use index 4 (black_border) */
-        if (!emask[uc & 63]) {                  /* wholly outside the picture: black */
-            static const UBYTE none[16];
-            src = none; p2 = p3 = 0; zero4 = 0;
-        } else if (colstate[uc & 63] == 2) {    /* a blank column: black beside the NES picture, the backdrop */
+        if (colstate[uc & 63] == 2) {    /* a blank column: black beside the NES picture, the backdrop */
             static const UBYTE blank[16];       /* colour (index 4) in its hidden left 8 pixels               */
             src = blank; p3 = 0; zero4 = 0;
             p2 = (x + 8 > cam_ux && x < cam_ux + 256) ? 0xff : 0;
         }
         last_src = src; last_attr = zero4 | (ULONG)(p3 << 8 | p2);
-        tsrc[uc & 63][r][c - 1].src = src; tsrc[uc & 63][r][c - 1].attr = last_attr;
-        if (emask[uc & 63] == 0xff || !emask[uc & 63]) tile8(c == 1 ? d : d + 240 * 64, src, last_attr);
-        else {                                  /* a column across the picture's edge: keep its inside pixels */
-            tile8m(c == 1 ? d : d + 240 * 64, src, last_attr, emask[uc & 63]);
-            last_src = 0;
-        }
+        tile8(c == 1 ? d : d + 240 * 64, src, last_attr);
     }
 }
 
@@ -275,8 +252,7 @@ static void want_cols(LONG *lo, LONG *hi)
 }
 
 static UBYTE fresh;                     /* a new screen is being drawn: it may stay black until it is complete */
-static LONG fe_cam = -100000;                /* the camera at the last fix_edges() */
-static void invalidate(void) { col_lo = 1; col_hi = 0; work_row = -1; fresh = 1; fe_cam = -100000; }
+static void invalidate(void) { col_lo = 1; col_hi = 0; work_row = -1; fresh = 1; }
 
 /* make every row's copies match what the scroll position sy shows; a big jump (a camera cut) is spread over
    frames by time_left(): returns 0 while rows are still missing (the picture stays black meanwhile) */
@@ -323,8 +299,7 @@ VSTATIC void stream_cols(int n)          /* n tiles; n < 0: as many as time_left
             else if (col_lo > lo) work_col = col_lo - 1;
             else return;
             work_row = 0;
-            colstate[work_col & 63] = col_visible(work_col) ? 1 : 2;
-            emask[work_col & 63] = edge_mask(work_col);
+            colstate[work_col & 63] = col_want(work_col) == 2 ? 2 : 1;
         }
         if (work_row == 0) { work_up = cur_up; work_lo = cur_lo; }
         else if (work_up != cur_up || work_lo != cur_lo) { work_row = 0; work_up = cur_up; work_lo = cur_lo; }  /* the bank changed */
@@ -338,54 +313,37 @@ VSTATIC void stream_cols(int n)          /* n tiles; n < 0: as many as time_left
     }
 }
 
-/* columns that crossed the edge of the NES picture since they were drawn: blank the ones that left it (their
-   nametable cells now belong to the other side of the wrap), draw the ones that came into it */
-VSTATIC void mask_col(LONG uc, UBYTE m)         /* draw the shown copies of column uc again with mask m */
+/* what column uc must hold: 1 drawn from the nametable (in the picture), 2 blank (the backdrop in the NES's hidden
+   left 8 pixels), 0 anything (outside the picture: the display window hides it, video_vbl) */
+static UBYTE col_want(LONG uc)
 {
     LONG x = uc * 8;
-    int r;
-    UBYTE *d;
-    TileSrc *t = tsrc[uc & 63][0];
-    if (x < -64 || x >= LEVEL_W + 320) return;
-    d = disp_front + ((x + disp_margin) >> 3);
-    for (r = 0; r < 30; r++, t += 2, d += 8 * 64) {
-        if (rowcopies[r] & 1) tile8m(d, t[0].src, t[0].attr, m);
-        if (rowcopies[r] & 2) tile8m(d + 240 * 64, t[1].src, t[1].attr, m);
-    }
+    if (col_visible(uc)) return 1;
+    return (UBYTE)(x + 8 > cam_ux && x < cam_ux + 256 ? 2 : 0);
 }
 
-static UBYTE fe_pmask;
-static LONG fe_lo, fe_hi;
-VSTATIC void fix_edge_cols(LONG lo, LONG hi);
+/* columns that came into the picture, or into its hidden left 8 pixels, since they were drawn: draw them again
+   if they hold something else (blank, or stale nametable cells: colstate 3) */
 VSTATIC void fix_edges(void)
-{
-    LONG d = cam_ux - fe_cam, a = d < 0 ? cam_ux : fe_cam;
-    if (d > -16 && d < 16 && fe_pmask == (ppu_mask & 2)) {     /* a small move: only columns near the two edges */
-        LONG b = (d < 0 ? fe_cam : cam_ux) + 8;
-        fix_edge_cols((a >> 3) - 1, (b >> 3) + 1);
-        fix_edge_cols(((a + 256) >> 3) - 1, ((b + 256) >> 3) + 1);
-        if (col_lo < fe_lo) fix_edge_cols(col_lo, fe_lo - 1);     /* columns completed since the last call */
-        if (col_hi > fe_hi) fix_edge_cols(fe_hi + 1, col_hi);
-    } else fix_edge_cols(col_lo, col_hi);
-    fe_cam = cam_ux; fe_pmask = (UBYTE)(ppu_mask & 2); fe_lo = col_lo; fe_hi = col_hi;
-}
-VSTATIC void fix_edge_cols(LONG lo, LONG hi)
 {
     LONG uc;
     int r;
-    if (lo < col_lo) lo = col_lo;
-    if (hi > col_hi) hi = col_hi;
-    for (uc = lo; uc <= hi; uc++) {
-        UBYTE want = col_visible(uc) ? 1 : 2, m = edge_mask(uc), have = emask[uc & 63];
-        if (!m) {                               /* outside the picture: black, whatever was drawn there */
-            if (have) { emask[uc & 63] = 0; mask_col(uc, 0); }
-            continue;
-        }
-        if (colstate[uc & 63] != want || !have) {   /* entered the picture: draw it from the nametable */
-            colstate[uc & 63] = want; emask[uc & 63] = m;
+    for (uc = col_lo; uc <= col_hi; uc++) {
+        UBYTE want = col_want(uc);
+        if (want && colstate[uc & 63] != want) {
+            colstate[uc & 63] = want;
             for (r = 0; r < 30; r++) draw_tile(uc, r);
-        } else if (m != have) { emask[uc & 63] = m; mask_col(uc, m); }   /* the edge moved across it */
+        }
     }
+}
+
+/* a column outside the picture is not drawn when the NES changes one of its cells; it is marked stale (colstate 3)
+   and drawn again when it comes into the picture (fix_edges) */
+static int vis_or_stale(LONG uc)
+{
+    if (col_visible(uc)) return 1;
+    if (colstate[uc & 63] == 1) colstate[uc & 63] = 3;
+    return 0;
 }
 
 /* the NES changed nametable cell i: redraw it where it is on screen (or the 16 tiles of an attribute cell) */
@@ -404,8 +362,8 @@ VSTATIC int redraw_cell(UWORD i)
             if (!cp) continue;
             for (cc = cx0; cc <= cx1; cc++) {
                 for (uc = uc0 + ((cc - uc0) & 31); uc <= col_hi; uc += 32)
-                    if (col_visible(uc)) { draw_tile_copies(uc, r, cp); cnt++; }
-                if (work_row > r && (work_col & 31) == cc && col_visible(work_col)) { draw_tile_copies(work_col, r, cp); cnt++; }
+                    if (vis_or_stale(uc)) { draw_tile_copies(uc, r, cp); cnt++; }
+                if (work_row > r && (work_col & 31) == cc && vis_or_stale(work_col)) { draw_tile_copies(work_col, r, cp); cnt++; }
             }
         }
         return cnt;
@@ -413,15 +371,15 @@ VSTATIC int redraw_cell(UWORD i)
     if ((i & 0x3ff) < 0x3c0) {
         int cx = i & 31, row = (i >> 5) & 31, ntx = (i >> 10) & 1, col = ((ntx << 5) | cx) - (row < split_row ? up_dcol : 0);
         for (uc = uc0 + ((col - uc0) & 63); uc <= col_hi; uc += 64)
-            if (col_visible(uc)) { draw_tile(uc, row); cnt++; }       /* the border is not updated */
-        if (work_row > row) { uc = work_col; if ((uc & 63) == (col & 63) && col_visible(uc)) { draw_tile(uc, row); cnt++; } }
+            if (vis_or_stale(uc)) { draw_tile(uc, row); cnt++; }       /* outside the picture: drawn when it comes in */
+        if (work_row > row) { uc = work_col; if ((uc & 63) == (col & 63) && vis_or_stale(uc)) { draw_tile(uc, row); cnt++; } }
     } else {
         int a = i & 0x3f, ntx = (i >> 10) & 1, ax = (a & 7) * 4, ay = (a >> 3) * 4;
         for (r = ay; r < ay + 4 && r < 30; r++)
             for (c = 0; c < 4; c++) {
                 int col = ((ntx << 5) | (ax + c)) - (r < split_row ? up_dcol : 0);
                 for (uc = uc0 + ((col - uc0) & 63); uc <= col_hi; uc += 64)
-                    if (col_visible(uc)) { draw_tile(uc, r); cnt++; }
+                    if (vis_or_stale(uc)) { draw_tile(uc, r); cnt++; }
             }
     }
     return cnt;
@@ -739,17 +697,6 @@ VSTATIC void render_group(Group *g, UBYTE *e, UBYTE *o)
                     (ULONG)(dx | ((at & 0x40) << 2) | ((at & 0x80) << 2) | ((at & 3) << 10) | (o ? 0x1000 : 0)));
         }
     }
-    if (g->x1 > 256) {                          /* the NES shows no sprite pixel right of its picture */
-        int keep = 256 - g->x0, y, h = g->y1 - g->y0;
-        ULONG mh = keep >= 32 ? 0xffffffffUL : keep <= 0 ? 0 : ~(0xffffffffUL >> keep);
-        ULONG ml = keep >= 64 ? 0xffffffffUL : keep <= 32 ? 0 : ~(0xffffffffUL >> (keep - 32));
-        ULONG *l = (ULONG *)e, *l2 = (ULONG *)o;
-#ifndef __m68k__
-        mh = __builtin_bswap32(mh); ml = __builtin_bswap32(ml);    /* the host harness is little-endian */
-#endif
-        for (y = 0; y < h; y++, l += 4) { l[0] &= mh; l[1] &= ml; l[2] &= mh; l[3] &= ml; }
-        if (l2) for (y = 0; y < h; y++, l2 += 4) { l2[0] &= mh; l2[1] &= ml; l2[2] &= mh; l2[3] &= ml; }
-    }
 }
 
 VSTATIC void clear_lines(UBYTE *p, int n)
@@ -769,8 +716,7 @@ static int ncache[2];
 static ULONG *tile_hash;                /* by 4 KB CHR bank and tile: a hash of its 16 bytes (video_load) */
 VSTATIC ULONG group_sig(Group *g, int with_o)
 {
-    ULONG h = (ULONG)g->n * 0x9e3779b1UL ^ (ULONG)(g->y1 - g->y0) ^ ((ULONG)with_o << 31) ^ ((ULONG)(ppu_ctrl & 0x28) << 20)
-            ^ (g->x1 > 256 ? (ULONG)g->x0 << 12 : 0);   /* clipped at the right edge (render_group) */
+    ULONG h = (ULONG)g->n * 0x9e3779b1UL ^ (ULONG)(g->y1 - g->y0) ^ ((ULONG)with_o << 31) ^ ((ULONG)(ppu_ctrl & 0x28) << 20);
     int k;
     for (k = 0; k < g->n; k++) {
         int i = g->idx[k];

@@ -1,61 +1,12 @@
 ; video68k.s - the two inner loops of src/video.c, in assembly (they run every frame and stay in the cache).
         section code,code
-        xdef    _tile8,_spr_put,_tile8m
+        xdef    _tile8,_spr_put
         xref    _video_plane,_video_flip
 
 ; void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"))
 ; One 8x8 NES tile into 4 bitplanes, 64 bytes a line: planes 0-1 from the CHR tile (8 bytes plane 0,
 ; 8 bytes plane 1), planes 2-3 filled with the attribute bytes in attr bits 0-7 and 8-15; with attr bit 16,
 ; plane 2 is set where the tile has colour 0 instead (palette-0 tiles: their backdrop pixels use index 4).
-; void tile8m(UBYTE *d a0, const UBYTE *chr a1, ULONG attr d0, ULONG mask d1): tile8 that keeps only the pixels
-; in mask (the columns across the NES picture's edge); masked in registers, so it writes like tile8
-_tile8m: movem.l d2-d5/a2-a4,-(sp)
-        move.l  _video_plane,d2
-        lea     (a0,d2.l),a2
-        lea     (a2,d2.l),a3
-        lea     (a3,d2.l),a4
-        move.w  d0,d3
-        lsr.w   #8,d3
-        and.b   d1,d3                   ; plane 3 byte
-        move.b  d0,d4
-        and.b   d1,d4                   ; plane 2 byte
-        moveq   #7,d5
-        btst    #16,d0
-        bne.s   .mz
-.ml     move.b  8(a1),d2
-        and.b   d1,d2
-        move.b  d2,(a2)
-        move.b  (a1)+,d2
-        and.b   d1,d2
-        move.b  d2,(a0)
-        move.b  d4,(a3)
-        move.b  d3,(a4)
-        lea     64(a0),a0
-        lea     64(a2),a2
-        lea     64(a3),a3
-        lea     64(a4),a4
-        dbf     d5,.ml
-        bra.s   .mx
-.mz     move.b  8(a1),d2                ; plane 2 = the colour-0 pixels (attr bit 16)
-        move.b  (a1)+,d4
-        move.b  d2,d0
-        or.b    d4,d0
-        not.b   d0
-        and.b   d1,d0
-        move.b  d0,(a3)
-        and.b   d1,d2
-        move.b  d2,(a2)
-        and.b   d1,d4
-        move.b  d4,(a0)
-        move.b  d3,(a4)
-        lea     64(a0),a0
-        lea     64(a2),a2
-        lea     64(a3),a3
-        lea     64(a4),a4
-        dbf     d5,.mz
-.mx     movem.l (sp)+,d2-d5/a2-a4
-        rts
-
 _tile8: movem.l d2/a2-a4,-(sp)          ; unrolled: fixed offsets, no loop
         move.l  _video_plane,d2
         lea     (a0,d2.l),a2

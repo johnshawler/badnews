@@ -8,4 +8,5 @@ int  video_load(void);                  /* before sys_take(): sprite lists in ch
 void video_start(void);                 /* after disp_on() */
 void video_frame(void);                 /* once per drawn frame */
 void video_idle(void);                  /* the end of a frame: optional work in the time left */
+void video_vbl(void);                   /* the vertical blank hook: keys, and the display window (Amiga only) */
 #endif

@@ -143,12 +143,12 @@ Say the verdict in the report from the start; name the upgrade.
 - CHR-bank animation of the background: never redraw everything; compare the two 4 KB banks tile by tile and
   redraw the visible cells whose tile differs, a few columns a frame (`retile_step`). Each column remembers the
   banks it was drawn with; restart a column being streamed when the bank changes.
-- Black border: draw palette-0 colour-0 pixels as index 4 (a copy of the backdrop) and set index 0 to black. The
-  columns that straddle the picture's two edges at a fine scroll are drawn through a pixel mask (`edge_mask`,
-  `tile8m` masks in registers), columns wholly outside are drawn black, and an edge column is drawn again from a
-  per-tile cache of what it was drawn from (`tsrc`) when the edge moves across it; check only the columns near the
-  two edges unless the camera jumps. Clip sprite clusters at x 256 too. Blanking whole columns (with a one-column
-  hysteresis) left up to 15 pixels of overscan that the user saw at once.
+- Black border: draw palette-0 colour-0 pixels as index 4 (a copy of the backdrop) and set index 0 to black, and
+  narrow the display window to the NES picture (256 x 224) at every vertical blank from `sys_vbl_hook`
+  (`video_vbl`): the chipset hides the tile columns that cross the picture's edges at a fine scroll and the
+  sprites beyond them, for free. Masking edge columns by CPU or blitter cost 14,000+ colour clocks a frame while
+  the camera moved and made the ball's flight judder. Columns outside the picture are not blanked; one is redrawn
+  when it comes in only if a cell changed meanwhile.
 - Show NES lines 8-231 (`view_h` 224, scroll + 8, sprite y - 8), as an NTSC TV did: games stream the next row
   through the top 8 lines, and it shows (crowd at the top of field play). The reference renderer shows it too.
 - More than four sprite clusters on the same lines: before dropping one, merge two narrow clusters on different
@@ -161,6 +161,8 @@ Say the verdict in the report from the start; name the upgrade.
 - Sound: APU model (length, envelope, sweep, linear counter, 240 Hz sequencer) → Paula periods and volumes with
   looped one-period waveforms. DMC: list the game's samples in `tools/games/<game>.py` (print `apu_reg` when
   `apu_trig` bit 4 is set), `tools/dmc.py` converts them on the host; a sample takes Paula channel 3 for its time.
+  Pulse channels: reload the period only when the game writes `$4002/3` or `$4006/7` (`apu_wr`); the sweep unit
+  changes it in between (rising and falling whistles), and copying the register every frame flattens them.
   The game's own sample table lists them all (here bank 4, opcode `$F9 rate addr len` in its sound scripts):
   compare it with the list. **Everything Paula, the blitter or the sprites read must be copied to chip RAM with
   `sys_chip_copy()`**: with the current crosstools linker a vasm `data_c` section loses its chip flag, so on a

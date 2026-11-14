@@ -104,6 +104,9 @@ static void set_chan(int n, BYTE *ptr, UWORD words, UWORD per, UWORD vol)
 #ifdef SND_ONLY_DMC
     vol = 0;                                    /* debug: only the DMC samples are heard */
 #endif
+#ifdef SND_ONLY_CH
+    if (n != SND_ONLY_CH) vol = 0;              /* debug: one Paula channel only */
+#endif
     if (ptr != cur_ptr[n]) { PAULA->aud[n].ac_ptr = (UWORD *)ptr; PAULA->aud[n].ac_len = words; cur_ptr[n] = ptr; }
     if (per != cur_per[n]) { PAULA->aud[n].ac_per = per; cur_per[n] = per; }
     if (vol != cur_vol[n]) { PAULA->aud[n].ac_vol = vol; cur_vol[n] = vol; }
@@ -174,14 +177,16 @@ static void quarter(int half)
 void sound_frame(void)
 {
     ULONG ticks = logic_frames - last_frame;
-    UBYTE en = apu_reg[0x15], trig = apu_trig;
+    UBYTE en = apu_reg[0x15], trig = apu_trig, wr = apu_wr;
     int n, q;
     if (!on) return;
     last_frame = logic_frames;
-    apu_trig = 0;
+    apu_trig = 0; apu_wr = 0;
     /* restarted notes */
     for (n = 0; n < 2; n++) {
-        pulse[n].timer = (UWORD)(apu_reg[n * 4 + 2] | ((apu_reg[n * 4 + 3] & 7) << 8));
+        /* the period only when the game wrote it: the sweep unit changes it between writes (the ball in flight) */
+        if ((trig & (1 << n)) || (wr & (2 << (2 * n)))) pulse[n].timer = (UWORD)(apu_reg[n * 4 + 2] | ((apu_reg[n * 4 + 3] & 7) << 8));
+        if (wr & (1 << (2 * n))) pulse[n].sweep_reload = 1;
         if (trig & (1 << n)) { pulse[n].len = len_tab[apu_reg[n * 4 + 3] >> 3]; pulse[n].env_start = 1; }
     }
     if (trig & 4) { tri_len = len_tab[apu_reg[11] >> 3]; tri_reload = 1; }

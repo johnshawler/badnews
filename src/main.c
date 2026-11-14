@@ -122,7 +122,8 @@ int main(int argc, char **argv)
     if (!game_load() || !disp_open(&display)) { disp_close(); sys_free_all(); return 20; }
     sys_force_pal = 1;                                          /* NTSC machine: run the 256-line picture at 50 Hz */
     if (!sys_take()) { disp_close(); sys_free_all(); return 20; }
-    sys_vbl_hook = sys_key_poll;                                /* keys are read at every vertical blank */
+    sys_vbl_hook = video_vbl;                                   /* keys are read at every vertical blank, and the
+                                                                   display window narrowed to the NES picture */
     hz = sys_is_pal ? 50 : 60;
     disp_palette(palette, 0, 48);
     disp_on();

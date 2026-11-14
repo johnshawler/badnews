@@ -78,7 +78,7 @@ int main(int argc, char **argv)
     g = fopen("assets/chr.bin", "rb"); if (!g || fread(nes_chr_data, 1, 0x20000, g) != 0x20000) return 2; fclose(g);
     game_init(); video_load(); disp_open(&video_display); video_start();
     for (t = 0; t < n; t++) {
-        game_tick(game_bench_input(t));
+        game_tick(getenv("NOINPUT") ? 0 : game_bench_input(t));   /* NOINPUT: the attract mode (intro) */
         if (getenv("EVERY") && t % atoi(getenv("EVERY")) && !strstr(list, key0(t + 1))) continue;   /* draw only every Nth tick, like a slow Amiga */
         video_frame(); video_idle();
         snprintf(key, sizeof key, ",%u,", t + 1);

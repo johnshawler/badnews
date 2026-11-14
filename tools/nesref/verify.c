@@ -15,6 +15,7 @@ uint8_t nes_prg_data[0x20000], nes_chr_data[0x20000];
 void nes_wait(int kind, uint16_t pc) { (void)kind; (void)pc; }
 static int slice_hit;                                   /* nes.c asked for a slice (nes.h): end the tick */
 void nes_slice(void) { slice_hit = 1; }
+void nes_s0_frame(uint16_t pc) { (void)pc; }        /* never called: step() ends the frame before the read */
 uint16_t nes_dispatch(uint16_t pc) { return pc; }
 uint16_t nes_reset_entry(void) { return 0; }
 
@@ -58,6 +59,10 @@ static int step(void)
 {
     uint8_t op, m, lo, hi; uint16_t a = 0; int mode = 0, k;
     pc0 = PC;
+    if (s0at[pc0] && s0at[pc0] - 1 == bank_of(pc0) && nes_s0_pending()) {   /* a second sprite-0 wait this frame: */
+        uint8_t o = nes_rd(PC);                 /* the frame ends before the $2002 read (nes.h)              */
+        if ((o == 0x2c || o == 0xad) && nes_rd((uint16_t)(PC + 1)) == 0x02 && nes_rd((uint16_t)(PC + 2)) == 0x20) return 4;
+    }
     if (covf && PC >= 0x8000) { static uint8_t ex[8][0x8000]; int b = bank_of(PC);
         if (!ex[b][PC - 0x8000]) { ex[b][PC - 0x8000] = 1; fprintf(covf, "E %d %04x\n", b, PC); } }
     op = rd(PC++);
@@ -187,7 +192,8 @@ int main(int argc, char **argv)
     nes_init(nes_prg_data, nes_chr_data);
     PC = (uint16_t)(nes_rd(0xfffc) | nes_rd(0xfffd) << 8);
     for (t = 0; t < n; t++) {
-        nes_pad = pad_of(bench_input(t));
+        nes_pad = getenv("NOINPUT") ? 0 : pad_of(bench_input(t));   /* NOINPUT: the attract mode (intro) */
+        if (kind >= 0) nes_frame_begin();
         if (kind >= 0 && kind != 2) {                   /* start of a frame after a wait: NMI, then the vblank flag */
             if (ppu_ctrl & 0x80) {
                 uint16_t back = PC; uint8_t s0 = S;

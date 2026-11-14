@@ -8,7 +8,9 @@ const uint8_t *nes_prg, *nes_chr, *nes_prg_lo, *nes_prg_hi;
 uint8_t nes_bank;
 uint16_t nes_fatal_pc; int nes_fatal_why;
 uint16_t nes_slice_count;
-uint8_t nes_sliced, nes_in_nmi;
+uint8_t nes_sliced, nes_in_nmi, nes_s0_used;
+int nes_s0_pending(void) { return nes_s0_used && !nes_in_nmi; }
+void nes_frame_begin(void) { nes_s0_used = 0; }
 
 uint8_t nes_vram[0x800], nes_pal[32], nes_oam[256];
 uint8_t ppu_ctrl, ppu_mask, ppu_fx, ppu_vbl;
@@ -24,7 +26,7 @@ uint16_t nes_ndirty;
 uint8_t  nes_dirty_flag[0x800];
 uint8_t  nes_redraw_all = 1, nes_pal_dirty = 1;
 
-uint8_t  split_on, split_ctrl, split_chr0, split_chr1, split_fx, split_line, split_seen;
+uint8_t  split_on, split_ctrl, split_chr0, split_chr1, split_fx, split_line, split_seen, split_v6;
 uint16_t split_t;
 
 uint8_t apu_reg[0x18], apu_trig;
@@ -152,7 +154,9 @@ uint8_t nes_read_s0(void)
     if (ppu_s0) {
         split_seen = 1;
         split_ctrl = ppu_ctrl; split_chr0 = mmc_chr0; split_chr1 = mmc_chr1; split_t = ppu_t; split_fx = ppu_fx;
-        split_line = (uint8_t)(nes_oam[0] + 1 + s0_first_row());   /* the last line drawn with the upper values */
+        split_line = (uint8_t)(nes_oam[0] + 1 + s0_first_row());
+        split_v6 = 0;
+        nes_s0_used = 1;   /* the last line drawn with the upper values */
     }
     ppu_vbl = 0; ppu_w = 0; ppu_s0 ^= 1;
     return r;
@@ -210,7 +214,7 @@ void nes_write_slow(uint16_t a, uint8_t v)
                 else ppu_t = (uint16_t)((ppu_t & 0x8c1f) | ((v & 7) << 12) | ((v & 0xf8) << 2));
                 ppu_w ^= 1; break;
         case 6: if (!ppu_w) ppu_t = (uint16_t)((ppu_t & 0x00ff) | ((v & 0x3f) << 8));
-                else { ppu_t = (uint16_t)((ppu_t & 0xff00) | v); ppu_v = ppu_t; }
+                else { ppu_t = (uint16_t)((ppu_t & 0xff00) | v); ppu_v = ppu_t; if (split_seen) split_v6 = 1; }
                 ppu_w ^= 1; break;
         case 7: vram_write(v); break;
         }

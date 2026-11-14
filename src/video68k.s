@@ -5,7 +5,8 @@
 
 ; void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"))
 ; One 8x8 NES tile into 4 bitplanes, 64 bytes a line: planes 0-1 from the CHR tile (8 bytes plane 0,
-; 8 bytes plane 1), planes 2-3 filled with the attribute bytes in attr bits 0-7 and 8-15.
+; 8 bytes plane 1), planes 2-3 filled with the attribute bytes in attr bits 0-7 and 8-15; with attr bit 16,
+; plane 2 is set where the tile has colour 0 instead (palette-0 tiles: their backdrop pixels use index 4).
 _tile8: movem.l d2/a2-a4,-(sp)          ; unrolled: fixed offsets, no loop
         move.l  _video_plane,d2
         lea     (a0,d2.l),a2
@@ -13,6 +14,8 @@ _tile8: movem.l d2/a2-a4,-(sp)          ; unrolled: fixed offsets, no loop
         lea     (a3,d2.l),a4
         move.w  d0,d1
         lsr.w   #8,d1                   ; plane 3 byte
+        btst    #16,d0
+        bne     .z4
         move.b  8(a1),(a2)
         move.b  0(a1),(a0)
         move.b  d0,(a3)
@@ -45,6 +48,65 @@ _tile8: movem.l d2/a2-a4,-(sp)          ; unrolled: fixed offsets, no loop
         move.b  7(a1),448(a0)
         move.b  d0,448(a3)
         move.b  d1,448(a4)
+        movem.l (sp)+,d2/a2-a4
+        rts
+.z4                                     ; attr bit 16: plane 2 = the tile's colour-0 pixels (NES palette 0:
+        move.b  8(a1),d2
+        move.b  d2,(a2)
+        or.b    0(a1),d2
+        not.b   d2
+        move.b  d2,(a3)
+        move.b  0(a1),(a0)
+        move.b  d1,(a4)
+        move.b  9(a1),d2
+        move.b  d2,64(a2)
+        or.b    1(a1),d2
+        not.b   d2
+        move.b  d2,64(a3)
+        move.b  1(a1),64(a0)
+        move.b  d1,64(a4)
+        move.b  10(a1),d2
+        move.b  d2,128(a2)
+        or.b    2(a1),d2
+        not.b   d2
+        move.b  d2,128(a3)
+        move.b  2(a1),128(a0)
+        move.b  d1,128(a4)
+        move.b  11(a1),d2
+        move.b  d2,192(a2)
+        or.b    3(a1),d2
+        not.b   d2
+        move.b  d2,192(a3)
+        move.b  3(a1),192(a0)
+        move.b  d1,192(a4)
+        move.b  12(a1),d2
+        move.b  d2,256(a2)
+        or.b    4(a1),d2
+        not.b   d2
+        move.b  d2,256(a3)
+        move.b  4(a1),256(a0)
+        move.b  d1,256(a4)
+        move.b  13(a1),d2
+        move.b  d2,320(a2)
+        or.b    5(a1),d2
+        not.b   d2
+        move.b  d2,320(a3)
+        move.b  5(a1),320(a0)
+        move.b  d1,320(a4)
+        move.b  14(a1),d2
+        move.b  d2,384(a2)
+        or.b    6(a1),d2
+        not.b   d2
+        move.b  d2,384(a3)
+        move.b  6(a1),384(a0)
+        move.b  d1,384(a4)
+        move.b  15(a1),d2
+        move.b  d2,448(a2)
+        or.b    7(a1),d2
+        not.b   d2
+        move.b  d2,448(a3)
+        move.b  7(a1),448(a0)
+        move.b  d1,448(a4)                ; they show index 4, the backdrop; index 0 is the black border)
         movem.l (sp)+,d2/a2-a4
         rts
 

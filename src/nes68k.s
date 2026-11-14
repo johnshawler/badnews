@@ -9,7 +9,7 @@
         xdef    _dispatch,_unwind,_io_rd,_io_wr,_rd_ea,_wr_ea_d0,_php,_plp,_set_prg,_wait   ; for the profiler only
         xref    _cpu_a,_cpu_s,_cpu_x,_cpu_y,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
 ;       _cpu_x,_cpu_y,_cpu_s,_cpu_c,_cpu_z,_cpu_n,_cpu_v,_cpu_i,_cpu_d
-        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig,_nes_slice_count,_nes_slice,_nes_in_nmi
+        xref    _nes_ram,_nes_prg_lo,_nes_prg_hi,_nes_prg_data,_ppu_v,_ppu_ctrl,_nes_vram,_nes_dirty,_nes_dirty_flag,_nes_ndirty,_nes_redraw_all,_nes_bank,_mmc_shift,_mmc_chr0,_mmc_chr1,_mmc_ctrl,_mmc_prg,_pad_shift,_pad_strobe,_nes_pad,_ppu_w,_ppu_mask,_ppu_fx,_ppu_t,_apu_reg,_apu_trig,_nes_slice_count,_nes_slice,_nes_in_nmi,_split_seen,_split_v6,_nes_s0_used,_nes_s0_frame
         xref    _nes_io_read,_nes_read_s0,_nes_write_slow,_nes_wait,_nes_fatal,_nes_mmc_prg,_nes_mmc_ctrl
 
 ; ---- moving the 6502 state between the globals and the registers
@@ -204,8 +204,19 @@ _io_rd:                                 ; a0 = address -> d4
         movem.l (sp)+,d0-d1/a0-a1
         move.w  (sp)+,ccr
         rts
-_rd_s0:                                 ; $2002 read in a sprite 0 wait -> d4
-        move.w  ccr,-(sp)
+_rd_s0:                                 ; $2002 read in a sprite 0 wait -> d4; a1 = the read's address
+        tst.b   _nes_s0_used            ; the hit was seen this frame already: the frame ends here (nes.h)
+        beq.s   .rd
+        tst.b   _nes_in_nmi
+        bne.s   .rd
+        bsr     _store_state
+        move.l  a1,d4
+        and.l   #$ffff,d4
+        move.l  d4,-(sp)
+        jsr     _nes_s0_frame
+        addq.l  #4,sp
+        bsr     _load_state
+.rd     move.w  ccr,-(sp)
         movem.l d0-d1/a0-a1,-(sp)
         jsr     _nes_read_s0
         move.b  d0,d4
@@ -461,6 +472,9 @@ _io_wr: cmpa.w  #$2007,a0               ; PPU data port: nametable writes done h
         move.w  d1,_ppu_t
         move.w  d1,_ppu_v
         clr.b   _ppu_w
+        tst.b   _split_seen             ; after a split: the lower part's own address (split_v6, nes.h)
+        beq     .done
+        move.b  #1,_split_v6
         bra     .done
 .apu    cmpa.l  #$4018,a0               ; APU registers: kept for src/sound.c, with the channel restart bits
         bcc     .call

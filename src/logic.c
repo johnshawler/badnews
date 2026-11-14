@@ -46,6 +46,20 @@ void nes_slice(void)
     nes_sliced = 1;                             /* before the yield: the checksum after this tick sees it */
     co_yield();
     logic_frames++;
+    nes_frame_begin();
+}
+
+/* A second sprite-0 wait in one frame (nes.h): the frame ends here, then the NMI with the read's address. */
+void nes_s0_frame(uint16_t pc)
+{
+    nes_sliced = 0;
+    logic_burst = nes_slice_count;
+    nes_slice_count = 0;
+    split_on = split_seen;
+    co_yield();
+    logic_frames++;
+    nes_frame_begin();
+    if (ppu_ctrl & 0x80) do_nmi(pc);
 }
 
 /* Called by the translated code in a loop that waits for the next frame. */
@@ -57,6 +71,7 @@ void nes_wait(int kind, uint16_t pc)
     split_on = split_seen;                      /* a sprite-0 split in this frame, in the NMI or in the main thread */
     co_yield();                                 /* the frame is over: the Amiga side draws it */
     logic_frames++;
+    nes_frame_begin();
     if (ppu_ctrl & 0x80) do_nmi(pc);            /* vertical blank */
     if (kind == WAIT_VBL) ppu_vbl = 1;          /* a $2002 poll sees the flag after the NMI */
 }

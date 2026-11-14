@@ -93,7 +93,8 @@ static void tile8(UBYTE *d, const UBYTE *chr, ULONG attr)
 {
     int i;
     host_tiles++;
-    for (i = 0; i < 8; i++, d += 64) { d[0] = chr[i]; d[video_plane] = chr[i + 8]; d[2 * video_plane] = (UBYTE)attr; d[3 * video_plane] = (UBYTE)(attr >> 8); }
+    for (i = 0; i < 8; i++, d += 64) { d[0] = chr[i]; d[video_plane] = chr[i + 8];
+        d[2 * video_plane] = (attr & 0x10000) ? (UBYTE)~(chr[i] | chr[i + 8]) : (UBYTE)attr; d[3 * video_plane] = (UBYTE)(attr >> 8); }
 }
 static void spr_put(UBYTE *e, UBYTE *o, const UBYTE *chr, ULONG ctl)
 {
@@ -144,7 +145,20 @@ static UBYTE up0, up1, lo0, lo1, bgsel;
 
 
 /* nametable cell of unwrapped column uc, row r (vertical mirroring: two nametables side by side) */
-static UWORD nt_cell(LONG uc, int r) { return (UWORD)((((uc >> 5) & 1) << 10) | (r << 5) | (uc & 31)); }
+/* Vertical mirroring (game play): two nametables side by side, the world is unwrapped horizontally and 240 lines
+   tall; both copies of a tile row (buffer lines y and y + 240) show the same row.
+   Horizontal mirroring (the intro, the title): two nametables stacked, the world is 480 lines tall and the buffer
+   holds all of it: buffer line b shows world line (b + 240 * hk) mod 480, so the copy at y shows world row
+   r + 30 hk and the copy at y + 240 world row r + 30 (hk + 1), mod 60. hk changes when the view crosses line 240. */
+static UBYTE hmode, hk;
+static int hmode_now(void) { return (mmc_ctrl & 3) == 3; }   /* MMC1 mirroring: 3 = horizontal */
+static int world_row(int r, int copy) { return hmode ? (r + 30 * ((copy == 2) + hk)) % 60 : r; }
+static UWORD nt_cell_w(LONG uc, int w)          /* nametable cell of column uc in world row w */
+{
+    if (hmode) return (UWORD)(((w >= 30) << 10) | ((w % 30) << 5) | (uc & 31));
+    return (UWORD)((((uc >> 5) & 1) << 10) | (w << 5) | (uc & 31));
+}
+static UWORD nt_cell(LONG uc, int r) { return nt_cell_w(uc, world_row(r, 1)); }
 
 /* Columns in the 32-pixel borders beside the 256-pixel NES picture are drawn in the backdrop colour: the NES
    never shows them, and their nametable content belongs to the other side of the wrap. A column is blanked when
@@ -163,30 +177,51 @@ VSTATIC int col_visible(LONG uc) { LONG x = uc * 8; return x + 8 > cam_ux + ((pp
    but only the copies the current scroll shows are kept up to date: rowcopies[r] bit 0 = the copy at y,
    bit 1 = the copy at y + 240. When the scroll brings the other copy into view, that row is drawn again. */
 static UBYTE rowcopies[30];
-static UBYTE row_need(int r, int sy) { return (UBYTE)((8 * r + 8 > sy ? 1 : 0) | (8 * r < sy ? 2 : 0)); }
+static int world_top;                   /* screen lines above it come from draw_overlay() ($2006 split), not the world */
+static UBYTE row_need(int r, int sy)
+{
+    int lo = sy + world_top, hi = sy + 240;     /* the buffer lines the world shows */
+    return (UBYTE)((8 * r + 8 > lo && 8 * r < hi ? 1 : 0) | (8 * r + 248 > lo && 8 * r + 240 < hi ? 2 : 0));
+}
 
 VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies);
+static const UBYTE *last_src; static ULONG last_attr;
 VSTATIC void draw_tile(LONG uc, int r) { draw_tile_copies(uc, r, rowcopies[r]); }
 
 VSTATIC void draw_tile_copies(LONG uc, int r, UBYTE copies)
 {
     LONG sc = r < split_row ? uc + up_dcol : uc;          /* the nametable column this screen column shows */
-    UWORD cell = nt_cell(sc, r), base = cell & 0x400;
-    UBYTE tile = nes_vram[cell], tx = (UBYTE)(sc & 31);
-    UBYTE attr = nes_vram[base | 0x3c0 | ((r >> 2) << 3) | (tx >> 2)];
-    UBYTE pal = (UBYTE)((attr >> (((r & 2) << 1) | (tx & 2))) & 3);
-    const UBYTE *src = nes_chr_data + ((ULONG)(r < split_row ? cur_up : cur_lo) << 12) + (UWORD)tile * 16;   /* bg_bank() */
-    UBYTE p2 = (pal & 1) ? 0xff : 0, p3 = (pal & 2) ? 0xff : 0;
     LONG x = uc * 8;
-    UBYTE *d;
+    UBYTE tx = (UBYTE)(sc & 31), *d;
+    int c;
     if (x < -64 || x >= LEVEL_W + 320) return;
-    if (colstate[uc & 63] == 2) { static const UBYTE blank[16]; src = blank; p2 = p3 = 0; }   /* a border column */
 #ifdef LOGIC_TRACE
     { extern ULONG vtiles; vtiles++; }
 #endif
     d = disp_front + (ULONG)(r * 8) * 64 + ((x + disp_margin) >> 3);
-    if (copies & 1) tile8(d, src, (ULONG)(p3 << 8 | p2));
-    if (copies & 2) tile8(d + 240 * 64, src, (ULONG)(p3 << 8 | p2));     /* the copy for the vertical wrap */
+    for (c = 1; c <= 2; c++) {                  /* the copy at y, the copy at y + 240 (for the vertical wrap) */
+        int w, nr;
+        UWORD cell, base;
+        UBYTE attr, pal, p2, p3;
+        ULONG zero4;
+        const UBYTE *src;
+        if (!(copies & c)) continue;
+        if (c == 2 && !hmode && (copies & 1)) { tile8(d + 240 * 64, last_src, last_attr); continue; }   /* the same */
+        w = world_row(r, c); nr = w % 30;
+        cell = nt_cell_w(sc, w); base = cell & 0x400;
+        attr = nes_vram[base | 0x3c0 | ((nr >> 2) << 3) | (tx >> 2)];
+        pal = (UBYTE)((attr >> (((nr & 2) << 1) | (tx & 2))) & 3);
+        src = nes_chr_data + ((ULONG)(r < split_row ? cur_up : cur_lo) << 12) + (UWORD)nes_vram[cell] * 16;   /* bg_bank() */
+        p2 = (pal & 1) ? 0xff : 0; p3 = (pal & 2) ? 0xff : 0;
+        zero4 = pal ? 0 : 0x10000;              /* palette 0: its colour-0 pixels use index 4 (black_border) */
+        if (colstate[uc & 63] == 2) {           /* a blank column: black beside the NES picture, the backdrop */
+            static const UBYTE blank[16];       /* colour (index 4) in its hidden left 8 pixels               */
+            src = blank; p3 = 0; zero4 = 0;
+            p2 = (x + 8 > cam_ux && x < cam_ux + 256) ? 0xff : 0;
+        }
+        last_src = src; last_attr = zero4 | (ULONG)(p3 << 8 | p2);
+        tile8(c == 1 ? d : d + 240 * 64, src, last_attr);
+    }
 }
 
 /* the visible column range for the current camera, with a margin */
@@ -196,7 +231,8 @@ static void want_cols(LONG *lo, LONG *hi)
     *hi = (cam_ux - VIEW_X + 320 + 8) >> 3;
 }
 
-static void invalidate(void) { col_lo = 1; col_hi = 0; work_row = -1; }
+static UBYTE fresh;                     /* a new screen is being drawn: it may stay black until it is complete */
+static void invalidate(void) { col_lo = 1; col_hi = 0; work_row = -1; fresh = 1; }
 
 /* make every row's copies match what the scroll position sy shows; a big jump (a camera cut) is spread over
    frames by time_left(): returns 0 while rows are still missing (the picture stays black meanwhile) */
@@ -223,10 +259,10 @@ VSTATIC int sync_rows(int sy)
    vertical blank. The host harness has no beam: there it is a fixed number of tiles. */
 #ifdef __m68k__
 static ULONG beam_stop = VIDEO_BEAM_STOP;
-static int time_left(int done) { return done < 8 || sys_beam() < beam_stop; }
+static int time_left(int done) { return done < 8 || beam_stop == 0xffffffffUL || sys_beam() < beam_stop; }
 #else
 static ULONG beam_stop;
-static int time_left(int done) { return done < (beam_stop < 40000 ? 150 : 250); }
+static int time_left(int done) { return beam_stop == 0xffffffffUL || done < (beam_stop < 40000 ? 150 : 250); }
 #endif
 
 VSTATIC void stream_cols(int n)          /* n tiles; n < 0: as many as time_left() allows */
@@ -279,6 +315,23 @@ VSTATIC int redraw_cell(UWORD i)
 {
     LONG uc0 = col_lo, uc;
     int r, c, cnt = 0;
+    if (hmode) {                                /* stacked nametables: the cell is in world row w, in one copy */
+        int nt = (i >> 10) & 1, a = i & 0x3ff, ry0, ry1, cx0, cx1, w, rr, cc;
+        if (a < 0x3c0) { ry0 = ry1 = a >> 5; cx0 = cx1 = a & 31; }
+        else { a &= 0x3f; ry0 = (a >> 3) * 4; ry1 = ry0 + 3; cx0 = (a & 7) * 4; cx1 = cx0 + 3; if (ry1 > 29) ry1 = 29; }
+        for (rr = ry0; rr <= ry1; rr++) {
+            UBYTE cp;
+            w = nt * 30 + rr; r = w % 30;
+            cp = (UBYTE)(world_row(r, 1) == w ? 1 : 2) & rowcopies[r];
+            if (!cp) continue;
+            for (cc = cx0; cc <= cx1; cc++) {
+                for (uc = uc0 + ((cc - uc0) & 31); uc <= col_hi; uc += 32)
+                    if (col_visible(uc)) { draw_tile_copies(uc, r, cp); cnt++; }
+                if (work_row > r && (work_col & 31) == cc && col_visible(work_col)) { draw_tile_copies(work_col, r, cp); cnt++; }
+            }
+        }
+        return cnt;
+    }
     if ((i & 0x3ff) < 0x3c0) {
         int cx = i & 31, row = (i >> 5) & 31, ntx = (i >> 10) & 1, col = ((ntx << 5) | cx) - (row < split_row ? up_dcol : 0);
         for (uc = uc0 + ((col - uc0) & 63); uc <= col_hi; uc += 64)
@@ -338,7 +391,8 @@ VSTATIC int retile_col(LONG uc)
         }
         if (colbank_lo[c] != cur_lo) {
             const UBYTE *d = bank_diff(colbank_lo[c], cur_lo);
-            for (r = split_row; r < 30; r++) if (d[nes_vram[nt_cell(uc, r)]]) { draw_tile(uc, r); n++; }
+            for (r = split_row; r < 30; r++)
+                if (d[nes_vram[nt_cell(uc, r)]] || (hmode && d[nes_vram[nt_cell_w(uc, world_row(r, 2))]])) { draw_tile(uc, r); n++; }
         }
     }
     colbank_up[c] = cur_up; colbank_lo[c] = cur_lo;
@@ -359,6 +413,46 @@ VSTATIC void retile_step(int budget)
         int c = retile_at & 63;
         if (colbank_up[c] != cur_up || colbank_lo[c] != cur_lo) budget -= 1 + retile_col(retile_at);
         if (++retile_at > col_hi) retile_at = col_lo;
+    }
+}
+
+/* $2006 split (the intro): the lines above the split come from the upper part's own vertical scroll yup, drawn each
+   frame over the world (which the hardware scroll shows for the lower part) at buffer line sy + y for screen line y.
+   Partial tile rows are drawn line by line. The world rows overwritten are marked as missing (rowcopies). */
+static void tile_lines(UBYTE *d, const UBYTE *chr, ULONG attr, int f, int n)
+{
+    if (f == 0 && n == 8) { tile8(d, chr, attr); return; }
+    for (; n > 0; n--, f++, d += 64) {
+        d[0] = chr[f]; d[video_plane] = chr[f + 8];
+        d[2 * video_plane] = (attr & 0x10000) ? (UBYTE)~(chr[f] | chr[f + 8]) : (UBYTE)attr;
+        d[3 * video_plane] = (UBYTE)(attr >> 8);
+    }
+}
+
+static void draw_overlay(int last, int yup, int sy, LONG ulo, LONG uhi)
+{
+    static const UBYTE blank[16];
+    int y = 0, r;
+    LONG uc;
+    while (y <= last) {
+        int n = (yup + y) % (hmode ? 480 : 240), tr = n >> 3, f = n & 7, cnt = 8 - f, nr = tr % 30;
+        UBYTE *line = disp_front + (ULONG)(sy + y) * 64;
+        if (y + cnt > last + 1) cnt = last + 1 - y;
+        for (uc = ulo; uc <= uhi; uc++) {
+            LONG sc = uc + up_dcol, x = uc * 8;
+            UWORD cell = nt_cell_w(sc, tr), base = cell & 0x400;
+            UBYTE tx = (UBYTE)(sc & 31), attr = nes_vram[base | 0x3c0 | ((nr >> 2) << 3) | (tx >> 2)];
+            UBYTE pal = (UBYTE)((attr >> (((nr & 2) << 1) | (tx & 2))) & 3);
+            const UBYTE *src = nes_chr_data + ((ULONG)cur_up << 12) + (UWORD)nes_vram[cell] * 16;
+            ULONG a = (ULONG)(((pal & 2) ? 0xff00 : 0) | ((pal & 1) ? 0xff : 0)) | (pal ? 0 : 0x10000);
+            if (!col_visible(uc)) { src = blank; a = (x + 8 > cam_ux && x < cam_ux + 256) ? 0xff : 0; }
+            tile_lines(line + ((x + disp_margin) >> 3), src, a, f, cnt);
+        }
+        y += cnt;
+    }
+    for (r = 0; r < 30; r++) {                  /* world rows painted over: draw them again when they are needed */
+        if (8 * r + 8 > sy && 8 * r <= sy + last) rowcopies[r] &= (UBYTE)~1;
+        if (8 * r + 248 > sy && 8 * r + 240 <= sy + last) rowcopies[r] &= (UBYTE)~2;
     }
 }
 
@@ -388,7 +482,17 @@ int video_sprites_dropped;
 unsigned long vstat[3];                 /* host harness: groups kept in place, copied, drawn */
 #endif
 
-static Group *gp[64];                    /* the groups, in OAM order: pointers, so a merge moves no structure */
+static Group *gp[64];
+/* The OAM the clusters are built from: sprite 0 is left out when it is behind the background (priority bit): it is
+   then the game's split marker, which the NES hides behind opaque background (sprite priority is not modelled) */
+static const UBYTE *group_oam(void)
+{
+    static UBYTE oam[256];
+    if (!(nes_oam[2] & 0x20)) return nes_oam;
+    memcpy(oam, nes_oam, 256);
+    oam[0] = 0xf0;
+    return oam;
+}                    /* the groups, in OAM order: pointers, so a merge moves no structure */
 #ifdef __m68k__
 int build_groups68(Group **g __asm("a0"), Group *pool __asm("a1"), const UBYTE *oam __asm("a2"), int sh __asm("d0"));
 VSTATIC void build_groups_c(void);
@@ -402,7 +506,7 @@ static Group grp_c[64], *gp_c[64];
 #endif
 VSTATIC void build_groups(void)
 {
-    ngrp = build_groups68(gp, grp, nes_oam, (ppu_ctrl & 0x20) ? 16 : 8);    /* video68k.s */
+    ngrp = build_groups68(gp, grp, group_oam(), (ppu_ctrl & 0x20) ? 16 : 8);    /* video68k.s */
 #ifdef VIDEO_CHECK
     {   Group *sg = grp, **sp = gp; Group *keep[64]; int k, n68 = ngrp, bad = 0;
         static Group copy[64];
@@ -426,7 +530,7 @@ VSTATIC void build_groups(void)
 {
     int i, j, k, n = 0, nfree = 0;
     WORD sh = (ppu_ctrl & 0x20) ? 16 : 8;      /* 8x16 sprites (PPUCTRL bit 5) */
-    const UBYTE *o = nes_oam;
+    const UBYTE *o = group_oam();
     for (i = 0; i < 64; i++, o += 4) {
         WORD y = o[0], x = o[3], sy = (WORD)(y + 1);
         if (y >= 0xef) continue;
@@ -641,6 +745,8 @@ static void set_palette(int on)
         UBYTE c = (i & 3) ? nes_pal[i] : nes_pal[0];
         pal_rgb[i] = on ? nes_rgb[c & 0x3f] : 0;
     }
+    pal_rgb[0] = 0;                             /* black_border: index 0 is only the border; the NES backdrop
+                                                   inside the picture is drawn with index 4 (draw_tile_copies) */
     disp_palette(pal_rgb, 0, 32);
 }
 
@@ -680,8 +786,9 @@ void video_frame(void)
     int on = (ppu_mask & 0x18) != 0, budget = 0, i, rows_ok = 1, nes_ndirty_big;
     LONG vlo, vhi;
     WORD sx = (WORD)((((ppu_t & 0x1f) << 3) | ppu_fx) + ((ppu_t >> 10) & 1) * 256);
-    UWORD vt = split_on ? split_t : ppu_t;      /* a $2005 write after the split cannot change the vertical scroll */
-    WORD sy = (WORD)((((vt >> 5) & 0x1f) * 8 + ((vt >> 12) & 7)) % 240);
+    UWORD vt = split_on && !split_v6 ? split_t : ppu_t;  /* a $2005 write after the split cannot change the vertical */
+    WORD sy = (WORD)((((vt >> 5) & 0x1f) * 8 + ((vt >> 12) & 7)) % 240);              /* scroll; a $2006 write can */
+    int vsplit = split_on && split_v6;          /* the intro: the lower part has its own vertical scroll */
     WORD dcol = 0;
     UBYTE nsplit;
 
@@ -696,8 +803,20 @@ void video_frame(void)
 
     /* which tile set each row uses; a change means everything is drawn again */
     bgsel = (ppu_ctrl & 0x10) != 0;
+    {   /* the world line at the top of the view; stacked nametables (horizontal mirroring): 0..479 */
+        int full = (((vt >> 5) & 0x1f) * 8 + ((vt >> 12) & 7)), mod = hmode_now() ? 480 : 240;
+        if (hmode_now()) full += ((vt >> 11) & 1) * 240;
+        if (vsplit) full -= split_line;             /* $2006 at the split: line L + k shows the address's line + k */
+        full = (full % mod + mod) % mod;
+        if (hmode_now() != hmode || (hmode && (full >= 240) != hk)) {
+            hmode = (UBYTE)hmode_now(); hk = (UBYTE)(hmode && full >= 240);
+            invalidate(); memset(rowcopies, 0, sizeof rowcopies);
+        }
+        sy = (WORD)(full % 240);
+    }
+    world_top = vsplit ? split_line + 1 : 0;
     if (split_on) {
-        nsplit = (UBYTE)((split_line + 1 + 7) >> 3);
+        nsplit = vsplit ? 0 : (UBYTE)((split_line + 1 + 7) >> 3);   /* vsplit: the world is all lower part */
         up0 = split_chr0; up1 = split_chr1; lo0 = mmc_chr0; lo1 = mmc_chr1;
         bgsel = (split_ctrl & 0x10) != 0;
     } else {
@@ -727,7 +846,13 @@ void video_frame(void)
         }
     }
 
-    beam_stop = 30000;                          /* black: draw a part now, more in video_idle() after the logic */
+    /* Only a new screen (or a camera cut: many rows at once) may be drawn over several frames, black meanwhile;
+       ordinary scrolling is always drawn completely, even if the frame runs late (a black frame there flashes) */
+    {   int r, miss = 0;
+        for (r = 0; r < 30; r++) if (row_need(r, sy) & ~rowcopies[r]) miss++;
+        if (miss > 6) fresh = 1;
+    }
+    beam_stop = fresh ? 30000 : 0xffffffffUL;  /* black: draw a part now, more in video_idle() after the logic */
     VP(1, rows_ok = sync_rows(sy));
 
 #ifndef __m68k__
@@ -749,9 +874,11 @@ void video_frame(void)
        screen changes do; otherwise a few tiles a frame keep ahead of the scrolling */
     want_cols(&vlo, &vhi);
     budget = (on && col_lo <= vlo && col_hi >= vhi) ? 24 : -1;
+    if (!fresh) beam_stop = 0xffffffffUL;       /* scrolling: the columns the picture needs, all of them now */
     VP(1, stream_cols(budget));
     if (!on) VP(4, retile_step(400));          /* black anyway: catch up now; else video_idle() does it */
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
+    else fresh = 0;
     filling = !on && (ppu_mask & 0x18); fill_sy = sy;
     {   static LONG e_cam = -1, e_lo, e_hi; static UBYTE e_mask;     /* columns cross the edge only when these change */
         if (col_lo <= col_hi && (cam_ux != e_cam || col_lo != e_lo || col_hi != e_hi || ((ppu_mask ^ e_mask) & 2))) {
@@ -761,6 +888,13 @@ void video_frame(void)
     }
 
     if (nes_pal_dirty || on != was_on) { set_palette(on); nes_pal_dirty = 0; was_on = (UBYTE)on; }
+    if (vsplit && on) {
+        int yup = (((split_t >> 5) & 0x1f) * 8 + ((split_t >> 12) & 7)) + (hmode ? ((split_t >> 11) & 1) * 240 : 0);
+#ifndef __m68k__
+        if (getenv("VDEBUG")) printf("overlay L %d yup %d sy %d cols %ld..%ld\n", split_line, yup, sy, (long)vlo, (long)vhi);
+#endif
+        draw_overlay(split_line, yup, sy, vlo, vhi);
+    }
     disp_scroll(cam_ux - VIEW_X, sy);
     if ((ppu_mask & 0x10) && on) {
         /* the sprite lists only change when the sprites or their tile set do */

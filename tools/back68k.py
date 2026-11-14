@@ -199,7 +199,7 @@ def generate(g):
 
     def operand(mode, arg, s0=False):
         """(pre lines, operand, pre clobbers N/Z) for reading a memory operand"""
-        if s0 and mode == 'abs' and arg == 0x2002: return ['bsr _rd_s0'], 'd4', False
+        if s0 and mode == 'abs' and arg == 0x2002: return ['lea $%04x,a1' % s0, 'bsr _rd_s0'], 'd4', False   # a1 = the read's address
         if mode == 'imm': return [], '#$%02x' % arg, False
         if mode == 'zp': return [], '%d(a5)' % (arg - 0x80), False
         if mode == 'zpx': return [], '%d(a5,d1.w)' % (arg - 0x80), False
@@ -309,7 +309,7 @@ def generate(g):
 
             if m in ('LDA', 'LDX', 'LDY'):
                 r = REG[m[2]]
-                pre, op, _ = operand(mode, arg, a in s0)
+                pre, op, _ = operand(mode, arg, a if a in s0 else 0)
                 L += pre + ['move.b %s,%s' % (op, r)]
                 nzsrc = r; c68 = None; keep_c = True
             elif m in ('STA', 'STX', 'STY'):
@@ -381,7 +381,7 @@ def generate(g):
                     L += ['move.b %s,d4' % r, 'sub.b %s,d4' % op, 'eori.b #$10,ccr']; c68 = 'inv'
                 nzsrc = None
             elif m == 'BIT':
-                pre, op, _ = operand(mode, arg, a in s0)
+                pre, op, _ = operand(mode, arg, a if a in s0 else 0)
                 L += pre
                 if op != 'd4': L.append('move.b %s,d4' % op)
                 if LO & V: L += ['move.b d4,d5', 'andi.b #$40,d5']

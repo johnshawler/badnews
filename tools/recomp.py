@@ -200,7 +200,7 @@ def operand(ctx, m, mode, arg, s0):
         if arg < 0x2000: return '', 'M[0x%03x]' % (arg & 0x7ff), 'M[0x%03x] = {v};' % (arg & 0x7ff)
         if arg >= 0xc000: rde = 'P[0x%05x]' % (FIXED * 0x4000 + arg - 0xc000)
         elif arg >= 0x8000: rde = 'nes_prg_lo[0x%04x]' % (arg - 0x8000)
-        elif arg == 0x2002 and s0: rde = 'nes_read_s0()'
+        elif arg == 0x2002 and s0: rde = '({ if (nes_s0_pending()) { SAVE; nes_s0_frame(0x%04x); LOAD; } nes_read_s0(); })' % s0
         else: rde = 'nes_io_read(0x%04x)' % arg
         return '', rde, 'nes_write_slow(0x%04x, {v});' % arg
     if mode in ('abx', 'aby'):
@@ -256,7 +256,7 @@ def gen_function(ctx, entry):
             body_lines.append((a, L)); prev = None; continue
         m, mode, arg, n = d
         fall = (a + n) & 0xffff
-        s0 = a in s0_loops
+        s0 = a if a in s0_loops else 0               # the read's address (a second wait in a frame ends it there)
         if mode in ('imp', 'acc', 'rel') or (m in ('JMP', 'JSR')): setup, rde, wrf = '', None, None
         else: setup, rde, wrf = operand(ctx, m, mode, arg, s0)
         if setup: L.append(setup)

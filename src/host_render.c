@@ -29,7 +29,8 @@ void host_render(const char *path)
         uint16_t t = lower || !split_on ? ppu_t : split_t; uint8_t fx = lower || !split_on ? ppu_fx : split_fx;
         int sx = ((t & 0x1f) << 3 | fx) + ((t >> 10) & 1) * 256;
         int sy = ((t >> 5) & 0x1f) * 8 + ((t >> 12) & 7) + ((t >> 11) & 1) * 240;
-        if (lower) { int ys = ((split_t >> 5) & 0x1f) * 8 + ((split_t >> 12) & 7) + ((split_t >> 11) & 1) * 240; sy = ys; }
+        if (lower && split_v6) sy = (sy - split_line + 480) % 480;   /* $2006 at the split: line L+k shows address line +k */
+        else if (lower) { int ys = ((split_t >> 5) & 0x1f) * 8 + ((split_t >> 12) & 7) + ((split_t >> 11) & 1) * 240; sy = ys; }
         for (x = 0; x < 256; x++) {
             int wx = (sx + x) & 511, wy = (sy + y) % 480, nt = (wx >> 8) | ((wy / 240) << 1), tx = (wx & 255) >> 3, ty = (wy % 240) >> 3;
             uint8_t tile = nes_vram[nti(nt, ty * 32 + tx)], at = nes_vram[nti(nt, 0x3c0 + (ty >> 2) * 8 + (tx >> 2))];

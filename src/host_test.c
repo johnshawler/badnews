@@ -32,7 +32,7 @@ int main(int argc, char **argv)
     load("assets/chr.bin", nes_chr_data);
     game_init();
     for (t = 0; t < n; t++) {
-        game_tick(game_bench_input(t));
+        game_tick(getenv("NOINPUT") ? 0 : game_bench_input(t));   /* NOINPUT: the attract mode (intro) */
         if (verbose && (t + 1) % 100 == 0) printf("tick %u checksum %08x frames %u\n", t + 1, (unsigned)game_checksum(), (unsigned)logic_frames);
         if (ramlog) fwrite(nes_ram, 1, sizeof nes_ram, ramlog);
         snprintf(key, sizeof key, ",%u,", t + 1);

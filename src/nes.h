@@ -19,6 +19,13 @@ extern uint8_t nes_bank;                /* number of the bank at $8000 */
 
 uint8_t nes_io_read(uint16_t a);                /* $2000-$7FFF */
 uint8_t nes_read_s0(void);                      /* $2002 read by a loop that waits for the sprite 0 hit */
+/* A sprite-0 hit happens once a frame: a loop that waits for it again in the same frame (the intro syncs its main
+   loop this way, with no other frame wait) ends the frame there. The translated code asks nes_s0_pending() at a
+   sprite-0 read and then calls nes_s0_frame(address of the read) (logic.c), which runs the NMI with that address. */
+extern uint8_t nes_s0_used;
+int     nes_s0_pending(void);
+void    nes_s0_frame(uint16_t pc);
+void    nes_frame_begin(void);                  /* a new frame: the sprite-0 hit is possible again */
 void    nes_write_slow(uint16_t a, uint8_t v);  /* everything at $2000 and above */
 void    nes_mmc_prg(uint8_t v);                 /* MMC1 PRG register in one step (src/nes68k.s) */
 void    nes_mmc_ctrl(uint8_t v);                /* MMC1 control register in one step */
@@ -60,6 +67,8 @@ extern uint8_t  nes_pal_dirty;
 extern uint8_t  split_on, split_ctrl, split_chr0, split_chr1, split_fx, split_line;
 extern uint16_t split_t;
 extern uint8_t  split_seen;                     /* a split happened in the NMI that just ran */
+extern uint8_t  split_v6;                       /* after the split the game set the PPU address ($2006): the lower part
+                                                   then has its own vertical scroll too (the intro) */
 
 /* APU: the register file, and which channels were (re)started this frame. The Amiga side plays it. */
 extern uint8_t apu_reg[0x18];

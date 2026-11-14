@@ -122,3 +122,17 @@ What is left (fast RAM): the start-up tick (~15 late), screen loads with two sli
 frames that need two ticks and land a few thousand colour clocks over (~45). Next: cheaper load code (the
 meta-tile expansion around the $2007 loop), sprite list bookkeeping in assembly (`build_sprites`, `group_sig`),
 a 68030 bench.
+
+## 8. Three problems the user saw on the ADF (none was visible in the bench numbers)
+
+- **Flashing in field play**: the time-budgeted catch-up blanked the picture whenever a scrolled-in row or column
+  missed the budget. Only a new screen (or a camera cut) may be shown black now; scrolling always completes.
+- **Green border**: everything outside the 256x240 NES picture shows colour 0, which was the NES backdrop. Palette-0
+  tiles now put their colour-0 pixels into index 4 (a copy of the backdrop), so index 0 can be black (`tile8` with
+  attribute bit 16).
+- **The intro**: it uses horizontal mirroring (two nametables stacked) and a `$2006` split where the lower part has
+  its own vertical scroll, moved a pixel a frame by moving the split line. The display now keeps per-copy world
+  rows for stacked nametables and redraws the upper part over the world each frame. And the frame model granted a
+  sprite-0 hit on every read, so the intro loop (synced only by the hit) ran ~250 passes in one tick: a second
+  sprite-0 wait in one frame now ends the frame (`nes_s0_frame`, in C, 68k and verify.c). That also removed the
+  "start-up tick" of 480,000 instructions. Lesson: look at the attract mode, not only the bench.

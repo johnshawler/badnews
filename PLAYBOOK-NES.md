@@ -59,6 +59,8 @@ resets the per-game files and keeps everything reusable. The Claude skill in `sk
   tick of hundreds of thousands of colour clocks. End the tick every N writes to $2007 while the NMI is off and
   outside the NMI handler (`NES_SLICE`, `nes_slice()`); deterministic, so host, verify.c and Amiga agree. N must be
   at least what the NES does in a frame (Bad News Baseball: 128; at 96 or fewer the bench never reached field play).
+- **A sprite-0 hit happens once a frame.** A loop that syncs only on the hit (Bad News Baseball's intro) must end
+  the frame when it waits for the hit a second time (`nes_s0_frame`); otherwise hundreds of passes run in one tick.
 - **Lag**: check with the reference whether the original finishes its logic within each frame in the busy
   scenes. If it doesn't, game time on the NES is slower there and the frame model would need cycle budgets
   (not needed for Little League Baseball).
@@ -141,7 +143,13 @@ Say the verdict in the report from the start; name the upgrade.
 - CHR-bank animation of the background: never redraw everything; compare the two 4 KB banks tile by tile and
   redraw the visible cells whose tile differs, a few columns a frame (`retile_step`). Each column remembers the
   banks it was drawn with; restart a column being streamed when the bank changes.
-- Blank the border columns (outside the 256-pixel NES picture) when they leave the picture.
+- Blank the border columns (outside the 256-pixel NES picture) when they leave the picture. For a black border,
+  draw palette-0 colour-0 pixels as index 4 (a copy of the backdrop) and set index 0 to black.
+- Horizontal mirroring (stacked nametables, vertical scrolling scenes): each buffer copy of a tile row holds its own
+  world row (`world_row`). A `$2006` split gives the lower part its own vertical scroll: follow it with the hardware
+  scroll and redraw the upper part over it each frame (`draw_overlay`).
+- Never show black frames for ordinary scrolling catch-up (they flash); only for new screens.
+- Check the attract mode and intro against the reference, not only the bench scenes.
 - Sound: APU model (length, envelope, sweep, linear counter, 240 Hz sequencer) → Paula periods and volumes with
   looped one-period waveforms. DMC: list the game's samples in `tools/games/<game>.py` (print `apu_reg` when
   `apu_trig` bit 4 is set), `tools/dmc.py` converts them on the host; a sample takes Paula channel 3 for its time.

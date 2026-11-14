@@ -42,4 +42,4 @@ all, under the 1.4 MB limit; the largest single section is the 256 KB ROM copy (
 
 ## Outcome (REPORT.txt)
 
-Latest (REPORT.txt): stock 35.1 fps, 4 MB fast RAM 46.4 fps, checksum equal to the host. 50 Hz is not held on either machine (best was 37.9 / 48.3, before the border, intro and sound fixes the user asked for).
+Latest (REPORT.txt): stock 36.3 fps, 4 MB fast RAM 47.7 fps, checksum equal to the host. 50 Hz is not held on either machine (best was 37.9 / 48.3, before the border, intro and sound fixes the user asked for).

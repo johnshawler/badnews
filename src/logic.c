@@ -158,9 +158,21 @@ unsigned short game_bench_input(unsigned int t)
         { 170, 173, IN_START }, { 260, 263, IN_START }, { 340, 343, IN_START }, { 420, 423, IN_START },
         { 500, 503, IN_START }, { 580, 583, IN_START }, { 660, 663, IN_START }, { 740, 743, IN_START } };
     unsigned i;
+#ifndef PLAY_SCRIPT
     for (i = 0; i < sizeof presses / sizeof presses[0]; i++)
         if (t >= presses[i][0] && t <= presses[i][1]) return presses[i][2];
+#endif
     /* BENCH INPUT END */
+#ifdef PLAY_SCRIPT
+    {   /* debug builds: -DPLAY_SCRIPT -Iout replaces the bench input with out/play_script.h (tools/play.c's script as a table) */
+        static const unsigned short play[][3] = {
+#include "play_script.h"
+        };
+        unsigned m = 0;
+        for (i = 0; i < sizeof play / sizeof play[0]; i++) if (t >= play[i][0] && t <= play[i][1]) m |= play[i][2];
+        return (unsigned short)m;
+    }
+#endif
     return 0;
 }
 

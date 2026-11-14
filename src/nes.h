@@ -85,10 +85,13 @@ void     nes_wait(int kind, uint16_t pc);       /* logic.c: the game waits for t
 /* Slices: while the NMI is off (a screen being built) the NES runs for several frames without a frame boundary;
    every NES_SLICE writes to $2007 then end the tick there (nes_slice(), no NMI follows), as frames pass on the NES.
    Deterministic, so the host test, verify.c and the Amiga slice at the same writes. A slice must not be shorter
-   than what the NES does in a frame (its load loops: ~60 instructions a write, ~160 writes a frame): at 64 the
-   game's short NMI-off updates during batting were split into frames the NES never has, and it stopped putting
-   balls in play. Never inside the NMI handler (nes_in_nmi). */
-#define NES_SLICE 128
+   than what the NES does in a frame: at 64 the game's short NMI-off updates during batting were split into frames
+   the NES never has, and it stopped putting balls in play. The reference NES (tools/nesref -s) shows a full screen
+   load (~1,420 PPU writes) with rendering off for 2 frames; at 128 the port showed 8 black ticks there (the
+   switch from batting to field play), at 704 two, as the NES. Never inside the NMI handler (nes_in_nmi). */
+#ifndef NES_SLICE
+#define NES_SLICE 704                   /* also in src/nes68k.s (two places) */
+#endif
 extern uint16_t nes_slice_count;
 extern uint8_t  nes_sliced;
 extern uint8_t  nes_in_nmi;                     /* the NMI handler is running: never a slice there */                     /* the last tick ended in a slice (its registers were not stored) */

@@ -184,3 +184,28 @@ The user played the ADF again and saw three more things that no bench number sho
   game writes it (`apu_wr`, set by `src/nes.c` and the 68k fast path), and a sweep register write restarts the
   sweep divider. Checked on the host (`PER1=` in `tools/shost.c`) and in an emulator recording of pulse 2 alone
   (`-DSND_ONLY_CH=1`, `tools/bench_audio.sh`): 115 Hz rising to 750 Hz and back down.
+
+## 11. A crash the bench could not find, and shorter black frames between pitching and fielding
+
+- **Crash (down+B while pitching)**: the bench is computer against computer, so the code a player's pitching and
+  batting reach was never traced: the game jumped to untranslated addresses ($AAAC pitching, $99D0 batting).
+  `tools/play.c` plays scripted input on the host and stops at the first untranslated address; `tools/fuzz_play.py`
+  plays hundreds of random half-innings (down+B, A, directions) in a 1-player game. Most pitching runs stopped.
+  `verify.c` now takes the same scripts (`PLAY=`), so `VERIFY_COV` collects the entry points of those scenes
+  (`tools/flow/verify_pitch.txt`, `verify_bat.txt`); after `tools/make_assets.sh` 590 unseen fuzz runs and 40
+  random 20,000-tick games run clean, and a fuzz script that crashed before plays to tick 11,600 on the emulated
+  Amiga with the host's checksum. `-DPLAY_SCRIPT -Iout` compiles a script in place of the bench input.
+- Two traps on the way: `verify.c` reads `src/gen_waits.txt` from the current folder (run from `out/` it never ends a
+  tick and looks hung), and a `-D` with quotes passed through two scripts silently dropped the script, so the
+  "Amiga differs from the host" I chased for an hour was the bench input. Check the checksum of the plain bench
+  first when a scripted build differs.
+- **Black frames**: logged per frame (`video_black` in the debug frame log: NES rendering off, or still drawing).
+  A switch from pitching to fielding was 20-38 vertical blanks of black with fast RAM; the reference NES shows 2.
+  (1) Slices: the NES spends 2 frames on a full screen load (`tools/nesref -s`), the port 8 ticks at 128 writes a
+  slice; now 704. (2) Drawing: a new screen is drawn row by row, four tiles per 32-bit write (`tile4`), only the
+  columns the display window shows, until 66,000 colour clocks into the frame, and without the run-ahead tick
+  while black. The switch at a hit: 20 -> 11 vertical blanks; the others 35 -> about 20, where the game's own
+  logic (25,000 colour clocks a tick) and its catch-up after the load take the rest.
+- The bench plays a different game with the new slices (the RNG follows frame timing), with more field play
+  (785 ticks of over 20,000 colour clocks of logic against 685): 43.1 fps with fast RAM against 47.7 before. The
+  same code with 128-write slices gives 46.8; most of the difference is the busier game.

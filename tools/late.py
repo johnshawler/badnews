@@ -8,7 +8,7 @@ Examples: (tick, late vblanks, logic colour clocks of the frame's ticks, display
 cells, stream + row sync, sprites, grouping, retile, edges])."""
 import sys, struct, os
 d = sys.argv[1]; n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-f = open(os.path.join(d, 'frames.bin'), 'rb').read(); full = [struct.unpack('>9I', f[i:i + 36]) for i in range(0, len(f) - 35, 36)]
+f = open(os.path.join(d, 'frames.bin'), 'rb').read(); full = [(lambda e: (e[0], e[1] & 0x3fffffff) + e[2:])(struct.unpack('>9I', f[i:i + 36])) for i in range(0, len(f) - 35, 36)]   # tick bits 30-31: black (video_black)
 fr = [x[:3] for x in full]; parts = {x[0]: x[3:] for x in full}   # display parts: cells, stream+rows, sprites, grouping, retile, edges
 t = open(os.path.join(d, 'ticktime.bin'), 'rb').read(); tt = struct.unpack('>%dI' % (len(t) // 4), t)
 cat = {'logic spike': [], 'display': [], 'steady': []}

@@ -98,14 +98,19 @@ static void game_draw(void)
     sound_frame();
     read_keys();
 #ifdef LOGIC_TRACE
-    { extern ULONG frame_log[], frame_n; if (frame_n < 3000) { extern ULONG vlast[]; int k_; ULONG *e_ = frame_log + frame_n * 9; e_[0] = sys_frame; e_[1] = logic_frames; e_[2] = video_last; for (k_ = 0; k_ < 6; k_++) e_[3 + k_] = vlast[k_]; frame_n++; } }
+    { extern ULONG frame_log[], frame_n; extern UBYTE video_black; if (frame_n < 3000) { extern ULONG vlast[]; int k_; ULONG *e_ = frame_log + frame_n * 9; e_[0] = sys_frame; e_[1] = logic_frames | ((ULONG)video_black << 30); e_[2] = video_last; for (k_ = 0; k_ < 6; k_++) e_[3 + k_] = vlast[k_]; frame_n++; } }
 #endif
 #ifdef HOLD_AT                          /* debug: freeze the picture at a tick, for a screenshot */
     if (logic_frames >= HOLD_AT) { int i; disp_flip(); for (i = 0; i < 50 * 120 && !sys_keys[KEY_ESC]; i++) sys_wait_frame(); }
 #endif
     /* Idle time left in this frame: run the next tick now (src/logic.c, game_tick_ahead), with the input the loop
-       would pass it. Every fifth frame needs two ticks; this way it does the work of one. Never past the bench. */
-    if (sys_beam() + logic_last + AHEAD_MARGIN < SYS_CCK_FRAME && !(bench_ticks && logic_calls >= bench_ticks))
+       would pass it. Every fifth frame needs two ticks; this way it does the work of one. Never past the bench, and
+       not while the picture is black for a new screen: that time goes to drawing it (video_idle). */
+#ifndef NO_AHEAD
+    if (!video_filling() && sys_beam() + logic_last + AHEAD_MARGIN < SYS_CCK_FRAME && !(bench_ticks && logic_calls >= bench_ticks))
+#else
+    if (0)
+#endif
         game_tick_ahead(bench_ticks ? game_bench_input(logic_calls) : sys_joy(1));
     video_idle();                       /* optional display work (the crowd animation) in what is left */
 }

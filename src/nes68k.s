@@ -292,7 +292,7 @@ _vram_fast:
         tst.b   _nes_in_nmi
         bne.s   .out
         addq.w  #1,_nes_slice_count
-        cmp.w   #128,_nes_slice_count   ; NES_SLICE (src/nes.h)
+        cmp.w   #704,_nes_slice_count   ; NES_SLICE (src/nes.h)
         bcs.s   .out
         clr.w   _nes_slice_count
         movem.l d0-d1/a1,-(sp)          ; C may change these
@@ -386,7 +386,7 @@ _io_wr: cmpa.w  #$2007,a0               ; PPU data port: nametable writes done h
         tst.b   _nes_in_nmi             ; never inside the NMI handler
         bne     .done
         addq.w  #1,_nes_slice_count
-        cmp.w   #128,_nes_slice_count   ; NES_SLICE (src/nes.h)
+        cmp.w   #704,_nes_slice_count   ; NES_SLICE (src/nes.h)
         bcs     .done
         clr.w   _nes_slice_count
         jsr     _nes_slice              ; the tick ends here; d0-d1/a0-a1 are restored at .done

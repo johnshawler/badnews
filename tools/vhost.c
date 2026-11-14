@@ -82,6 +82,7 @@ int main(int argc, char **argv)
         game_tick(getenv("NOINPUT") ? 0 : game_bench_input(t));   /* NOINPUT: the attract mode (intro) */
         if (getenv("EVERY") && t % atoi(getenv("EVERY")) && !strstr(list, key0(t + 1))) continue;   /* draw only every Nth tick, like a slow Amiga */
         video_frame(); video_idle();
+        if (getenv("VBLACK")) { extern unsigned char video_black; printf("t%u black %d sliced %d\n", t + 1, video_black, nes_sliced); }
         snprintf(key, sizeof key, ",%u,", t + 1);
         if (strstr(list, key)) { snprintf(name, sizeof name, "vhost_%05u.ppm", t + 1); shot(name);
             if (getenv("OAMDUMP")) { int q; for (q = 0; q < 64; q++) if (nes_oam[q*4] < 0xef) printf("oam %2d y %3d t %02x a %02x x %3d\n", q, nes_oam[q*4], nes_oam[q*4+1], nes_oam[q*4+2], nes_oam[q*4+3]); }

@@ -165,6 +165,25 @@ static unsigned short bench_input(unsigned int t)      /* copy of game_bench_inp
     /* BENCH INPUT END */
     return 0;
 }
+/* PLAY="t0-t1:mask ...": scripted input as tools/play.c takes it (hex masks of logic.h IN_* bits), in place of the
+   bench input: to collect the entry points of scenes the bench never plays (VERIFY_COV) */
+static unsigned play0[1024], play1[1024], playm[1024], nplay; static int play_on;
+static void play_parse(const char *p)
+{
+    play_on = 1;
+    while (*p && nplay < 1024) {
+        unsigned a, b, m; int k;
+        if (sscanf(p, "%u-%u:%x%n", &a, &b, &m, &k) != 3) break;
+        play0[nplay] = a; play1[nplay] = b; playm[nplay] = m; nplay++;
+        p += k; while (*p == ' ' || *p == ',') p++;
+    }
+}
+static unsigned short play_input(unsigned t)
+{
+    unsigned i, m = 0;
+    for (i = 0; i < nplay; i++) if (t >= play0[i] && t <= play1[i]) m |= playm[i];
+    return (unsigned short)m;
+}
 static uint8_t pad_of(unsigned short in)
 {
     uint8_t p = 0;
@@ -189,10 +208,11 @@ int main(int argc, char **argv)
     }
     if (f) fclose(f);
     if (getenv("VERIFY_COV")) covf = fopen(getenv("VERIFY_COV"), "w");
+    if (getenv("PLAY")) play_parse(getenv("PLAY"));
     nes_init(nes_prg_data, nes_chr_data);
     PC = (uint16_t)(nes_rd(0xfffc) | nes_rd(0xfffd) << 8);
     for (t = 0; t < n; t++) {
-        nes_pad = getenv("NOINPUT") ? 0 : pad_of(bench_input(t));   /* NOINPUT: the attract mode (intro) */
+        nes_pad = getenv("NOINPUT") ? 0 : pad_of(play_on ? play_input(t) : bench_input(t));   /* NOINPUT: the attract mode (intro) */
         if (kind >= 0) nes_frame_begin();
         if (kind >= 0 && kind != 2) {                   /* start of a frame after a wait: NMI, then the vblank flag */
             if (ppu_ctrl & 0x80) {

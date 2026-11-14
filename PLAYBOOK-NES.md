@@ -169,6 +169,12 @@ Say the verdict in the report from the start; name the upgrade.
   fast-RAM machine the samples loaded into fast RAM and played as one click. Listen on both machines:
   `tools/bench_audio.sh out.wav N [--fast_memory=4096]` records the emulator (OpenAL Soft's wave backend) and
   `tools/wavscan.py` shows where it is loud.
+- New screens: draw them row by row with 32-bit writes (`tile4`, four tiles per long), only the columns the window
+  shows, until just before the vertical blank, and skip the run-ahead tick while black. Size load slices from the
+  reference NES (`tools/nesref -s`: frames with rendering off per load), not smaller.
+- Player input reaches code a computer-against-computer bench never runs: fuzz a 1-player game on the host
+  (`tools/fuzz_play.py check`), collect entry points with `verify.c` (`PLAY=`, `tools/fuzz_play.py cov`), put them in
+  `tools/flow/`, re-run `tools/make_assets.sh`, until unseen seeds run clean. Do it before handing out an ADF.
 - Develop both on the host harnesses (`tools/vhost.c`, `tools/shost.c`), then confirm on the emulator. Compare the
   display harness with `src/host_render.c` pixel by pixel every few ticks: it found every display bug of the
   second port.

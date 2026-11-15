@@ -167,11 +167,11 @@ static unsigned short bench_input(unsigned int t)      /* copy of game_bench_inp
 }
 /* PLAY="t0-t1:mask ...": scripted input as tools/play.c takes it (hex masks of logic.h IN_* bits), in place of the
    bench input: to collect the entry points of scenes the bench never plays (VERIFY_COV) */
-static unsigned play0[1024], play1[1024], playm[1024], nplay; static int play_on;
+static unsigned play0[8192], play1[8192], playm[8192], nplay; static int play_on;
 static void play_parse(const char *p)
 {
     play_on = 1;
-    while (*p && nplay < 1024) {
+    while (*p && nplay < 8192) {
         unsigned a, b, m; int k;
         if (sscanf(p, "%u-%u:%x%n", &a, &b, &m, &k) != 3) break;
         play0[nplay] = a; play1[nplay] = b; playm[nplay] = m; nplay++;
@@ -231,7 +231,14 @@ int main(int argc, char **argv)
         }
         {   long cnt = 0; static long *hist; uint16_t pcs = 0;
             if (getenv("VERIFY_STATS") && !hist) hist = calloc(0x10000, sizeof *hist);
-            for (;;) { int r; if (hist) hist[PC]++; r = step(); cnt++; if (r) { kind = r - 1; pcs = pc0; if (kind != 2) nes_slice_count = 0; break; } }
+            for (;;) { int r; if (hist) hist[PC]++; r = step(); cnt++; if (r) { kind = r - 1; pcs = pc0; if (kind != 2) nes_slice_count = 0; break; }
+                /* a tick that never ends: a wait loop the frame model does not know (src/gen_waits.txt) */
+                if (cnt == 20000000) { hist = calloc(0x10000, sizeof *hist); }
+                if (cnt == 21000000) { int i, j, best[8] = {0};
+                    for (i = 0; i < 0x10000; i++) for (j = 0; j < 8; j++) if (hist[i] > hist[best[j]]) { memmove(best + j + 1, best + j, (7 - j) * sizeof *best); best[j] = i; break; }
+                    fprintf(stderr, "verify: tick %u runs past 20M instructions (bank %d); hottest:", t, nes_bank);
+                    for (j = 0; j < 8; j++) fprintf(stderr, " %04x:%ld", best[j], hist[best[j]]);
+                    fprintf(stderr, "\n"); if (covf) fclose(covf); return 4; } }
             /* VERIFY_STATS=n: ticks of more than n 6502 instructions, with the most executed addresses */
             if (hist && cnt > atol(getenv("VERIFY_STATS"))) {
                 int i, j, best[5] = {0};
@@ -242,6 +249,7 @@ int main(int argc, char **argv)
             }
             if (hist) memset(hist, 0, 0x10000 * sizeof *hist); }
         fwrite(nes_ram, 1, sizeof nes_ram, log);
+        if (covf) fflush(covf);                 /* a run stopped by a timeout (a wait the frame model does not know) keeps its entries */
     }
     fclose(log);
     if (covf) fclose(covf);

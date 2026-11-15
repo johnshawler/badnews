@@ -14,7 +14,7 @@
 void host_render(const char *path);
 uint8_t nes_prg_data[0x20000], nes_chr_data[0x20000];
 
-static unsigned seg0[256], seg1[256], segm[256], nseg;
+static unsigned seg0[8192], seg1[8192], segm[8192], nseg;
 static unsigned input(unsigned t)
 {
     unsigned i, m = 0;
@@ -27,7 +27,7 @@ int main(int argc, char **argv)
     unsigned n = (unsigned)atoi(argv[1]), t, every = getenv("EVERY") ? (unsigned)atoi(getenv("EVERY")) : 0;
     char *p = argc > 2 ? argv[2] : "", list[8192], key[32], name[64];
     FILE *f;
-    while (*p && nseg < 256) {
+    while (*p && nseg < 8192) {
         unsigned a, b, m; int k;
         if (sscanf(p, "%u-%u:%x%n", &a, &b, &m, &k) != 3) break;
         seg0[nseg] = a; seg1[nseg] = b; segm[nseg] = m; nseg++;

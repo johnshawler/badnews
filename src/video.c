@@ -279,7 +279,7 @@ static void draw_col_rows(LONG uc, int r0, int r1)
    tile8 makes four byte writes (chip RAM writes are what a new screen costs). Same pixels as four tile8 calls. */
 static void tile4(UBYTE *d, const UBYTE *const *s, const ULONG *a)
 {
-#ifdef __m68k__
+#if defined(__m68k__) && !defined(NO_TILE4)
     ULONG p2 = 0, p3 = 0, z = 0;
     const UBYTE *s0 = s[0], *s1 = s[1], *s2 = s[2], *s3 = s[3];
     ULONG vp = video_plane;
@@ -576,6 +576,19 @@ static int spare_time(void) { return sys_beam() < VIDEO_BEAM_STOP - 4000; }   /*
 #else
 static int spare_time(void) { static int n; return (++n & 7) != 0; }   /* host: some columns a frame */
 #endif
+/* the columns the picture shows first, at once, while the screen stands still (the between-innings pitchers and
+   batters are animated by bank switches: a cell drawn from the old bank for a few frames showed a pink face block
+   or a missing arm); the rest, and everything while the camera moves (the crowd), a few columns at a time */
+static void retile_now(void)
+{
+    LONG lo, hi, uc;
+    want_cols(&lo, &hi);
+    if (lo < col_lo) lo = col_lo;
+    if (hi > col_hi) hi = col_hi;
+    for (uc = lo; uc <= hi && spare_time(); uc++)
+        if (colbank_up[uc & 63] != cur_up || colbank_lo[uc & 63] != cur_lo) retile_col(uc);
+}
+
 VSTATIC void retile_step(int budget)
 {
     LONG n = col_hi - col_lo + 1, k;
@@ -771,6 +784,15 @@ VSTATIC int merge_into(Group *a, Group *prev, Group *b)
 VSTATIC int free_chan(Group *g)
 {
     int b, a;
+    for (a = 0; a < 4; a++) {                   /* g itself next to a cluster that has room (the third pitcher's
+                                                   glove beside his face) */
+        Chan *ca = &chan[a];
+        Group *t;
+        if (!ca->n) continue;
+        t = ca->seg[ca->n - 1];
+        if (a == 3 && !(t->pal3only && g->pal3only)) continue;
+        if (merge_into(t, ca->n > 1 ? ca->seg[ca->n - 2] : 0, g)) return 1;
+    }
     for (b = 0; b < 3; b++) {
         Chan *cb = &chan[b];
         Group *last;
@@ -807,7 +829,12 @@ VSTATIC void assign(void)
         Group *g = order[i];
         if (g->pal3only && try_place(&chan[3], g)) continue;
         for (k = 0; k < 3; k++) if (try_place(&chan[k], g)) break;
-        if (k == 3 && !free_chan(g)) video_sprites_dropped++;
+        if (k == 3 && !free_chan(g)) {
+            video_sprites_dropped++;
+#ifndef __m68k__
+            if (getenv("VDROP")) printf("drop t%u x %d..%d y %d..%d n %d\n", (unsigned)logic_frames, g->x0, g->x1, g->y0, g->y1, g->n);
+#endif
+        }
     }
 }
 
@@ -1090,9 +1117,40 @@ void video_frame(void)
     if (!fresh) beam_stop = 0xffffffffUL;       /* scrolling: the columns the picture needs, all of them now */
     VP(1, stream_cols(budget));
     if (!on) VP(4, retile_step(400));          /* black anyway: catch up now; else video_idle() does it */
+    else {
+        static LONG still_cam; static WORD still_sy;
+#ifndef NO_RETILE_NOW
+        if (cam_ux == still_cam && sy == still_sy) VP(4, retile_now());   /* a still screen: now (retile_now) */
+#endif
+        still_cam = cam_ux; still_sy = sy;
+    }
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
     else fresh = 0;
     video_black = (UBYTE)(!(ppu_mask & 0x18) ? 1 : !on ? 2 : 0);
+#ifdef LOGIC_TRACE
+    if (on) {                                   /* debug: frames shown with visible columns drawn from an old bank */
+        extern ULONG vstale_frames, vstale_cols; LONG a, b, u; int n = 0;
+        want_cols(&a, &b);
+        for (u = a + 2; u <= b - 2; u++) if (colbank_up[u & 63] != cur_up || colbank_lo[u & 63] != cur_lo) n++;
+        if (n) { vstale_frames++; vstale_cols += (ULONG)n; }
+    }
+#endif
+#ifdef VDUMP_AT                                 /* debug: the display state at one tick, written at exit (main.c) */
+    {   extern UBYTE vdump_buf[], vdump_done; extern ULONG vdump_hdr[];
+        if (!vdump_done && logic_frames >= VDUMP_AT) {
+            vdump_done = 1;
+            memcpy(vdump_buf, disp_front, 4 * (64UL * 480 + LEVEL_W / 8 + 64));
+            memcpy(vdump_buf + 4 * (64UL * 480 + LEVEL_W / 8 + 64), nes_pal, 32);
+            vdump_hdr[0] = logic_frames; vdump_hdr[1] = (ULONG)cam_ux; vdump_hdr[2] = (ULONG)sy; vdump_hdr[3] = disp_plane;
+            vdump_hdr[4] = on; vdump_hdr[5] = fresh; vdump_hdr[6] = (ULONG)col_lo; vdump_hdr[7] = (ULONG)col_hi;
+            memcpy(vdump_hdr + 8, pal_rgb, 32 * 4);
+            {   extern UBYTE vdump_vram[]; memcpy(vdump_vram, nes_vram, 0x800); }
+            {   extern ULONG vdump_ext[]; vdump_ext[0] = split_on; vdump_ext[1] = split_row; vdump_ext[2] = cur_up; vdump_ext[3] = cur_lo;
+                vdump_ext[4] = drawn_split; vdump_ext[5] = split_line; vdump_ext[6] = mmc_chr0 | mmc_chr1 << 8 | split_chr0 << 16 | (ULONG)split_chr1 << 24;
+                vdump_ext[7] = colbank_up[(col_lo + 10) & 63] | colbank_lo[(col_lo + 10) & 63] << 8; }
+        }
+    }
+#endif
 #ifndef __m68k__
     if (getenv("VINV")) { printf("t%u black %d inval %d cols %ld..%ld want %ld..%ld rows_ok %d cam %ld\n", (unsigned)logic_frames, video_black, inval_n, (long)col_lo, (long)col_hi, (long)vlo, (long)vhi, rows_ok, (long)cam_ux); inval_n = 0; }
 #endif

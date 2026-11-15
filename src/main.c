@@ -84,7 +84,13 @@ static void read_keys(void)
 void tile8(UBYTE *d __asm("a0"), const UBYTE *chr __asm("a1"), ULONG attr __asm("d0"));   /* src/video68k.s: its hunk's address for prof.py */
 #define AHEAD_MARGIN 6000               /* colour clocks: a tick like the last one, plus this, must fit before the flip */
 #define SYS_CCK_FRAME 71051
-static ULONG bench_ticks;               /* the bench length, or 0 */
+static ULONG bench_ticks;
+#ifdef LOGIC_TRACE
+ULONG vstale_frames, vstale_cols;
+#endif
+#ifdef VDUMP_AT
+UBYTE vdump_buf[4 * (64UL * 480 + 4096 / 8 + 64) + 32], vdump_done; ULONG vdump_hdr[40], vdump_ext[8]; UBYTE vdump_vram[0x800];
+#endif               /* the bench length, or 0 */
 
 static void game_draw(void)
 {
@@ -179,6 +185,12 @@ int main(int argc, char **argv)
             {   extern UBYTE vspr_dump[]; fh = Open((CONST_STRPTR)"sprdiff.bin", MODE_NEWFILE); if (fh) { Write(fh, vspr_dump, 800); Close(fh); } }
             {   extern ULONG snd_dbg[]; char b[120]; sprintf(b, "dmc trig %lu en %lu found %lu started %lu cut %lu ended %lu frames %lu ticks %lu\n", snd_dbg[0], snd_dbg[1], snd_dbg[2], snd_dbg[3], snd_dbg[4], snd_dbg[5], snd_dbg[6], snd_dbg[7]);
                 fh = Open((CONST_STRPTR)"sound.txt", MODE_NEWFILE); if (fh) { Write(fh, b, strlen(b)); Close(fh); } }
+#ifdef VDUMP_AT
+            {   extern UBYTE vdump_buf[]; extern ULONG vdump_hdr[]; fh = Open((CONST_STRPTR)"vdump.bin", MODE_NEWFILE);
+                if (fh) { extern ULONG vdump_ext[]; Write(fh, vdump_ext, 32); Write(fh, vdump_hdr, 40 * 4); Write(fh, vdump_buf, 4 * (64UL * 480 + 4096 / 8 + 64) + 32); Write(fh, vdump_vram, 0x800); Close(fh); } }
+#endif
+            {   extern ULONG vstale_frames, vstale_cols; char b[80]; sprintf(b, "stale frames %lu columns %lu\n", vstale_frames, vstale_cols);
+                fh = Open((CONST_STRPTR)"stale.txt", MODE_NEWFILE); if (fh) { Write(fh, b, strlen(b)); Close(fh); } }
             {   fh = Open((CONST_STRPTR)"frames.bin", MODE_NEWFILE); if (fh) { Write(fh, frame_log, frame_n * 36); Close(fh); } }
             {   extern uint32_t logic_time[]; fh = Open((CONST_STRPTR)"ticktime.bin", MODE_NEWFILE);
                 if (fh) { Write(fh, logic_time, logic_ntrace * 4); Close(fh); } }

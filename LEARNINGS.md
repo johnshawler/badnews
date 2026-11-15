@@ -209,3 +209,23 @@ The user played the ADF again and saw three more things that no bench number sho
 - The bench plays a different game with the new slices (the RNG follows frame timing), with more field play
   (785 ticks of over 20,000 colour clocks of logic against 685): 43.1 fps with fast RAM against 47.7 before. The
   same code with 128-write slices gives 46.8; most of the difference is the busier game.
+
+## 12. Pink squares in the cutscenes
+
+- The between-innings pitcher screen: watched on the emulator itself (`tools/shots.sh`, timed screenshots of a
+  scripted game) and compared with the reference NES (`tools/nesref -d`) frame by frame. Two things: (1) the
+  third pitcher's glove was dropped for the whole screen (five sprite clusters on the same lines); `free_chan()`
+  now also merges the cluster that has no channel into a neighbour that has room. Dropped clusters in a long
+  scripted game 12 -> 7 (all in field play, a few frames), in the bench 1 -> 0. (2) The pink face block when a
+  pitcher appears is the original game's: on the NES it shows for one frame (its background and face sprites
+  arrive a frame apart); the Amiga shows sprites a vertical blank after background changes, so it can last one
+  frame longer. Not changed.
+- Theories that measurement killed: CHR-bank animation lagging behind on still screens (a debug counter of frames
+  shown with visible columns from an old bank stayed 0), and a palette or VRAM difference (the Amiga's VRAM was
+  identical to the host's; the screenshot was simply taken one frame into the next screen's palette).
+- Long-game fuzzing: `tools/play.c` read only 256 input segments, so the earlier "40 clean long games" had no
+  input after their first third. With the limit raised, a long game reached untranslated code ($8006 by an
+  indirect jump, then a sprite-0 wait at $98B0 that `verify.c` could not end a tick in). `verify.c` now flushes
+  its coverage every tick and names the hottest addresses when a tick passes 20M instructions; four rounds of
+  coverage (`tools/flow/verify_game.txt`) left 0 of 160 unseen 20,000-tick games and 0 of 200 half-innings
+  stopping.

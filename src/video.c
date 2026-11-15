@@ -576,19 +576,6 @@ static int spare_time(void) { return sys_beam() < VIDEO_BEAM_STOP - 4000; }   /*
 #else
 static int spare_time(void) { static int n; return (++n & 7) != 0; }   /* host: some columns a frame */
 #endif
-/* the columns the picture shows first, at once, while the screen stands still (the between-innings pitchers and
-   batters are animated by bank switches: a cell drawn from the old bank for a few frames showed a pink face block
-   or a missing arm); the rest, and everything while the camera moves (the crowd), a few columns at a time */
-static void retile_now(void)
-{
-    LONG lo, hi, uc;
-    want_cols(&lo, &hi);
-    if (lo < col_lo) lo = col_lo;
-    if (hi > col_hi) hi = col_hi;
-    for (uc = lo; uc <= hi && spare_time(); uc++)
-        if (colbank_up[uc & 63] != cur_up || colbank_lo[uc & 63] != cur_lo) retile_col(uc);
-}
-
 VSTATIC void retile_step(int budget)
 {
     LONG n = col_hi - col_lo + 1, k;
@@ -1117,13 +1104,6 @@ void video_frame(void)
     if (!fresh) beam_stop = 0xffffffffUL;       /* scrolling: the columns the picture needs, all of them now */
     VP(1, stream_cols(budget));
     if (!on) VP(4, retile_step(400));          /* black anyway: catch up now; else video_idle() does it */
-    else {
-        static LONG still_cam; static WORD still_sy;
-#ifndef NO_RETILE_NOW
-        if (cam_ux == still_cam && sy == still_sy) VP(4, retile_now());   /* a still screen: now (retile_now) */
-#endif
-        still_cam = cam_ux; still_sy = sy;
-    }
     if (!(col_lo <= vlo && col_hi >= vhi) || !rows_ok) on = 0;
     else fresh = 0;
     video_black = (UBYTE)(!(ppu_mask & 0x18) ? 1 : !on ? 2 : 0);

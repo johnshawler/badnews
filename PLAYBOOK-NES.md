@@ -175,6 +175,9 @@ Say the verdict in the report from the start; name the upgrade.
 - Player input reaches code a computer-against-computer bench never runs: fuzz a 1-player game on the host
   (`tools/fuzz_play.py check`), collect entry points with `verify.c` (`PLAY=`, `tools/fuzz_play.py cov`), put them in
   `tools/flow/`, re-run `tools/make_assets.sh`, until unseen seeds run clean. Do it before handing out an ADF.
+- Watch scenes on the emulator, not only on the host harness: `tools/shots.sh` takes timed screenshots of a
+  scripted game (`-DPLAY_SCRIPT -Iout`). Compare doubtful frames with the reference NES (`tools/nesref -d`) before
+  fixing: some glitches are the original game's.
 - Develop both on the host harnesses (`tools/vhost.c`, `tools/shost.c`), then confirm on the emulator. Compare the
   display harness with `src/host_render.c` pixel by pixel every few ticks: it found every display bug of the
   second port.

@@ -11,17 +11,17 @@ Busiest moment:        field play: camera scrolling in x and y, 20-40 8x16 NES s
                        = not a Step 2 sum (translated logic dominates); measured with 4 MB fast RAM: logic 15-25k colour
                        clocks a tick (1.2 ticks a frame), display 20-45k a frame (FEASIBILITY.md, tools/late.py)
 Cut from the original: sprite-behind-background priority (sprites always in front); sprite clusters are dropped when more
-                       than four overlap vertically and two cannot share one 64-pixel sprite (the title logo); a scroll change at a
+                       than four overlap vertically and none can share a 64-pixel sprite (the title logo, a few field-play frames); a scroll change at a
                        raster split is shown in whole tiles (the home-run screen's pan moves in 8-pixel steps); the crowd animation reaches the screen a few frames late;
                        screen loads and camera cuts show black frames while the screen is drawn; the borders around the 256x224
                        picture are black (NES lines 8-231 shown, as on an NTSC TV; the display window is narrowed to the picture, NOTES.md); very high NES notes are clamped to Paula's fastest rate; DMC samples (the umpire's
                        voice, copied to chip RAM at start) play at half their rate (16.5 kHz) on channel 3 in place of the noise while they last.
-Stock A1200 bench:     frames=1621 late=955 worst_cck=1264152 avg_cck=87038 budget_cck=71051 worst_pct=1779 avg_pct=122 display_hz=50 shown_fps=31.4
+Stock A1200 bench:     frames=1620 late=949 worst_cck=1256438 avg_cck=86910 budget_cck=71051 worst_pct=1768 avg_pct=122 display_hz=50 shown_fps=31.5
                        ticks=3000 checksum=39948268  (FS-UAE 3.1.66, tools/port.sh, AROS ROM)
-With 4 MB fast RAM:    frames=2164 late=344 worst_cck=705785 avg_cck=46717 budget_cck=71051 worst_pct=993 avg_pct=65 display_hz=50 shown_fps=43.1
+With 4 MB fast RAM:    frames=2176 late=332 worst_cck=705688 avg_cck=46390 budget_cck=71051 worst_pct=993 avg_pct=65 display_hz=50 shown_fps=43.3
                        ticks=3000 checksum=39948268  (tools/port.sh fast)
 Host checksum:         39948268 after 3000 ticks  equal
-Frame rate claim:      43.1 fps shown with 4 MB fast RAM, 31.4 fps on the stock A1200, logic at 60 ticks a second (game time
+Frame rate claim:      43.3 fps shown with 4 MB fast RAM, 31.5 fps on the stock A1200, logic at 60 ticks a second (game time
                        follows the clock). The bench plays a busier game since screen loads are sliced as on the NES
                        (704 writes, LEARNINGS.md 11); the same code with the old 128-write slices gave 46.8 fps with fast
                        RAM (not this bench, not committed). 50 Hz NOT held on either: tools/port.sh prints FAIL on both. Where the late

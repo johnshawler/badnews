@@ -4985,6 +4985,7 @@ E 5 a16b
 E 5 a16d
 E 5 a16e
 E 5 a171
+E 5 a173
 E 5 a176
 E 5 a179
 E 5 a17b
@@ -5127,6 +5128,11 @@ E 5 a2c6
 E 5 a2c8
 E 5 a2cb
 E 5 a2cd
+E 5 a2cf
+E 5 a2d2
+E 5 a2d4
+E 5 a2d6
+E 5 a2d7
 E 5 a2d8
 E 5 a2d9
 E 5 a2da
@@ -8062,6 +8068,7 @@ E 6 a079
 E 6 a07b
 E 6 a07d
 E 6 a07f
+E 6 a081
 E 6 a084
 E 6 a086
 E 6 a088
@@ -9361,6 +9368,19 @@ E 6 ac0f
 E 6 ac11
 E 6 ac14
 E 6 ac16
+E 6 ac18
+E 6 ac1b
+E 6 ac1d
+E 6 ac1f
+E 6 ac21
+E 6 ac24
+E 6 ac26
+E 6 ac29
+E 6 ac2b
+E 6 ac2e
+E 6 ac30
+E 6 ac33
+E 6 ac36
 E 6 ac39
 E 6 ac3a
 E 6 ac3b
